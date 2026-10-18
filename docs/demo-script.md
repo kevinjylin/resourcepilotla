@@ -90,9 +90,10 @@ Put your teammate's phone on speaker, near the microphone. Press **Menu**, then 
 fill the native form, and tick **I understand: demo only**. On the native review card, point at
 "not 911" and the masked number, which shows only the last four digits. Say: "It can only call our
 demo contact, and the voice opens by saying this is a demo drill." Press **Call now**. The phone
-rings, the voice describes the emergency, and your teammate answers as the dispatcher. After the
-call, press **Check the call** to show the summary and transcript. Say: "One press places one call,
-and it is never retried. In a real emergency, call 911."
+rings, and the voice reports the emergency as the student asking for help. Your teammate answers
+as the dispatcher and asks a question or two; the voice answers only from the form, then thanks
+them and hangs up. After the call, press **Check the call** to show the summary and transcript.
+Say: "One press places one call, and it is never retried. In a real emergency, call 911."
 
 ## 7. My bookings (10 s)
 
