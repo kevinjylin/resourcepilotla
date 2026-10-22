@@ -40,10 +40,13 @@ official pages in [docs/official-links.md](docs/official-links.md) for anything 
   - `emergency`: Emergency Dispatcher (`phase="preview"`) → review card (`awaiting_call`).
     **Call now** sends the Dispatcher a `phase="call"` task, then the call card (`called`).
     **Check the call** sends a `phase="status"` task and shows the transcript.
+- The first prompt sets the student's school once. Store only its domain in `student_profiles`,
+  add it server-side to every workflow, and let **Change school** replace it. Never trust a school
+  value left in a service form.
 - The Orchestrator offers services from an image carousel: Study rooms, Health & wellness, Campus
   housing, Emergency (demo), and My bookings. A service opens an illustrated detail overview and
-  then a native form. Requests start only from a form submission; free text gets the menu card,
-  never a workflow.
+  then a native form without another email field. Requests start only from a form submission;
+  free text gets the school card or menu card, never a workflow.
   Every Orchestrator reply is a card.
 - Never add padding roles, or simulate several roles inside one chatbot.
 - The Orchestrator delegates with `ctx.send`. Keep workflow, request, requester, and session
@@ -59,6 +62,8 @@ official pages in [docs/official-links.md](docs/official-links.md) for anything 
   Keep `card_protocol_version="1"`, `requires_card_interaction="true"`, a supported
   `card_kind`, and a JSON `card_payload` of 64KB or less. Custom cards need a typed `root`
   and may be at most eight levels deep.
+- Card values are plain text, so `cards.card_message` repeats each intended https link as safe
+  markdown in its `TextContent`. Never link a `Sources` row that names failed checks.
 - Give every visual/navigation card a picture from `assets/cards` through `cards.art()`, and every
   specialist's status card its role art through `cards.agent_art()`. Keep image URLs https, and
   keep every card valid with `CARD_IMAGE_BASE` empty or non-https. Native `form` and `review`
@@ -71,7 +76,9 @@ official pages in [docs/official-links.md](docs/official-links.md) for anything 
   is a sequence of cards sent at real specialist handoffs.
 - Put stable action, workflow, and option IDs in selections. Parse direct JSON first, then the
   bounded prose allowlist. Never infer a re-check, a booking, or any other consequential action
-  from ambiguous prose, and never mark a card terminal when it has any input or CTA.
+  from ambiguous prose, and never mark a card terminal when it has any input or CTA. Add a main
+  menu route wherever the documented schema has a secondary action; predefined forms and reviews
+  intentionally have only their documented submit or approve/reject controls.
 
 ## Preserve live-data safety
 

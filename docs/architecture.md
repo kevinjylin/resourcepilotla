@@ -27,9 +27,10 @@ names its role and points to the Orchestrator; only the Orchestrator starts work
 
 ## Services and their chains
 
-The Orchestrator answers every chat with a card. A greeting or any free text gets the native
-services carousel; there is no sentence parser. Each service opens an illustrated detail overview
-and then a native form. Only a form submission starts a workflow.
+The Orchestrator answers every chat with a card. Until the requester has a saved school domain, a
+greeting or any other message gets the school card. After that, free text gets the native services
+carousel; there is no sentence parser. Each service opens an illustrated detail overview and then
+a native form without another email field. Only a form submission starts a workflow.
 
 Visual cards use art from this repository's `assets/cards`, chosen in
 [resourcepilot/cards.py](../resourcepilot/cards.py) by `cards.art()` and, for each specialist's
@@ -38,6 +39,9 @@ photo, and wellness events use the event's own photo, with repository art as the
 URLs are built from `CARD_IMAGE_BASE` and are always https; with it empty, every card stays valid.
 Native forms and the emergency review deliberately follow illustrated detail screens because the
 predefined `form` and `review` schemas cannot show images.
+Because card row values are plain text, the `TextContent` above each card repeats its intended
+verified https URLs as safe markdown links. Image URLs, selections, and failed `Sources` entries
+are excluded.
 
 | Service | Specialist chain | Ends with |
 | --- | --- | --- |
@@ -55,8 +59,10 @@ ends at the Planner has options to re-check (`awaiting_selection`).
 status is `booked` from the shared store, shows them as a carousel, and reconstructs the selected
 booking-link detail card by workflow ID.
 
-Before any workflow exists, the Orchestrator reduces every email field to its domain
-(`scrub_fields`). The local part of the address is never stored, sent, or logged.
+The school card reduces the email to its domain (`scrub_fields`) and stores one
+`student_profiles` row keyed by requester. The Orchestrator injects this saved domain into every
+workflow and ignores stale school values in service submissions. A Researcher result may add the
+verified institution name. The local part of the address is never stored, sent, or logged.
 
 ### Campus Researcher
 
@@ -179,7 +185,8 @@ the same room and slot.
 
 The emergency service is a demo drill. Its form asks what kind of emergency it is (medical, fire or
 smoke, someone in danger, or other), where on campus, how many people need help, optional details,
-whether you are safe, and an optional school name. Its chain is only the Emergency Dispatcher.
+and whether you are safe. The Orchestrator supplies the saved school; a form payload cannot replace
+it. Its chain is only the Emergency Dispatcher.
 
 1. **Preview.** The Orchestrator sends the Dispatcher a `phase="preview"` task. The Dispatcher
    validates the form, removes email addresses, caps free text, and returns the review data: the
@@ -197,7 +204,9 @@ Only the configured number is ever dialed; a number in the form or task payload 
 Emergency, crisis, and short numbers are refused, and the voice always opens with "this is a
 ResourcePilot demo drill, not a real emergency". Every emergency card says it is a demo drill that
 does not contact 911 or campus police, and "In a real emergency, call 911." A call starts only from
-the **Call now** selection, never from prose. The rules are in [trust-model.md](trust-model.md).
+the **Call now** selection, never from prose. The per-call prompt makes the voice play the student
+asking for help, answer only from validated form facts, and use ElevenLabs' `end_call` tool after
+the dispatcher has what they need. The rules are in [trust-model.md](trust-model.md).
 
 ## The task pipeline
 

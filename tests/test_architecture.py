@@ -8,6 +8,7 @@ from resourcepilot.config import ALL_AGENTS, PLATFORM_ROLES
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = (ROOT / "docker-compose.yml").read_text()
+DEPLOY_COMPOSE = (ROOT / "compose.deploy.yml").read_text()
 RUNTIME = (ROOT / "agents" / "run.py").read_text()
 REMOVED = (
     "sellers",
@@ -47,6 +48,16 @@ def test_containers_share_postgres_as_the_durable_store() -> None:
     template = (ROOT / ".env.example").read_text()
     assert "DATABASE_URL=postgresql://" in template
     assert "@postgres:5432/" in template
+
+
+def test_persistent_compose_uses_managed_postgres_and_publishes_no_ports() -> None:
+    assert "RESOURCEPILOT_DATABASE_URL:?" in DEPLOY_COMPOSE
+    assert "\n  postgres:" not in DEPLOY_COMPOSE
+    assert "\n    ports:" not in DEPLOY_COMPOSE
+    for role in PLATFORM_ROLES:
+        assert f"  {role.compose_service}:\n" in DEPLOY_COMPOSE
+        assert f"AGENT_ROLE: {role.key}\n" in DEPLOY_COMPOSE
+    assert DEPLOY_COMPOSE.count("AGENT_MODULE: agents.run") == len(PLATFORM_ROLES)
 
 
 def test_every_agent_has_a_profile_readme_naming_its_protocols() -> None:

@@ -47,7 +47,13 @@ from resourcepilot.housing import recheck_halls
 from resourcepilot.http import Http, ProviderError, build_http
 from resourcepilot.intake import scrub_fields
 from resourcepilot.models import AuditEvent, HealthResponse, TaskRequest, TaskResult
-from resourcepilot.research import recheck_events, recheck_link, research
+from resourcepilot.research import (
+    base_domain,
+    recheck_events,
+    recheck_link,
+    research,
+    school_domain,
+)
 from resourcepilot.rooms import campus_rooms_handler
 from resourcepilot.store import store
 from resourcepilot.workflow import (
@@ -220,13 +226,13 @@ async def handle_chat(ctx: Context, sender: str, message: ChatMessage) -> None:
 
 
 FORM_PROMPTS = {
-    "rooms": "Enter your school email and when you need a room. Only the domain is kept.",
-    "wellness": "Enter your school email and when you'd like a quiet room. Only the domain is "
-    "kept. In crisis? Call or text 988.",
-    "housing": "Enter your school email and what you need in a hall. Only the domain is kept.",
+    "rooms": "When do you need a room?",
+    "wellness": "When would you like a quiet room? In crisis? Call or text 988.",
+    "housing": "What do you need in a hall?",
     "emergency": "Describe the drill. It calls your team's demo contact, never 911. "
     "In a real emergency, call 911.",
 }
+SCHOOL_PROMPT = "First, set your school. Enter your school email once; only the domain is kept."
 # Free-text drill fields are trimmed and stripped of emails before the request is stored.
 EMERGENCY_TEXT = {"location": MAX_LOCATION, "details": MAX_DETAILS, "school": MAX_SCHOOL}
 FIELD_LIMIT = 200
@@ -248,12 +254,64 @@ def _form_fields(selection: dict[str, Any]) -> dict[str, Any]:
     return scrub_fields(fields)
 
 
-async def _start_workflow(ctx: Context, sender: str, service: str, fields: dict[str, Any]) -> None:
+async def _set_school(ctx: Context, sender: str, selection: dict[str, Any]) -> None:
+    """Save one school domain per requester; never persist the email's local part."""
+    profile = await store.get_profile(sender) or {}
+    current = str(profile.get("school_domain") or "")
+    fields = _form_fields(selection)
+    try:
+        if fields.get("email_invalid") or not fields.get("school_domain"):
+            raise ValueError("Enter your school email, for example you@purdue.edu")
+        domain = school_domain(str(fields["school_domain"]))
+    except ValueError as exc:
+        await _send_card(ctx, sender, str(exc), cards.school_card(current, error=str(exc)))
+        return
+    school_name = str(profile.get("school_name") or "") if domain == current else ""
+    await store.save_profile(sender, {"school_domain": domain, "school_name": school_name})
+    await _send_card(
+        ctx,
+        sender,
+        f"Your school is {domain}. Pick a campus service.",
+        cards.welcome_card(domain),
+    )
+
+
+async def _remember_school_name(requester: str, school: dict[str, Any]) -> None:
+    """Keep the verified institution name for later services, especially the demo drill."""
+    profile = await store.get_profile(requester)
+    name = clean_text(school.get("school_name"), MAX_SCHOOL)
+    if (
+        profile
+        and name
+        and base_domain(str(school.get("domain") or ""))
+        == base_domain(str(profile.get("school_domain") or ""))
+        and name != profile.get("school_name")
+    ):
+        await store.save_profile(requester, {**profile, "school_name": name})
+
+
+async def _start_workflow(
+    ctx: Context,
+    sender: str,
+    service: str,
+    fields: dict[str, Any],
+    *,
+    profile: dict[str, Any],
+) -> None:
+    # The saved profile is authoritative; stale or crafted form values cannot switch schools.
+    fields = {
+        key: value for key, value in fields.items() if key not in {"email_invalid", "school_domain"}
+    }
+    domain = str(profile["school_domain"])
     if service == "emergency":
         fields = {
             key: clean_text(value, EMERGENCY_TEXT[key]) if key in EMERGENCY_TEXT else value
             for key, value in fields.items()
+            if key != "school"
         }
+        fields["school"] = clean_text(profile.get("school_name") or domain, MAX_SCHOOL)
+    else:
+        fields["school_domain"] = domain
     request = {"service": service, "fields": fields}
     task = await begin_workflow(store, requester=sender, session_id=_session(ctx), request=request)
     state = await store.get_workflow(task.workflow_id)
@@ -275,6 +333,22 @@ async def _orchestrator_chat(
 ) -> None:
     action = str(selection.get("action", "")).strip()
     service = str(selection.get("service", "")).strip()
+    if action == "set_school":
+        await _set_school(ctx, sender, selection)
+        return
+    profile = await store.get_profile(sender)
+    school = str((profile or {}).get("school_domain") or "")
+    if action == "change_school":
+        await _send_card(
+            ctx,
+            sender,
+            "Enter your school email. Only the domain is kept.",
+            cards.school_card(school),
+        )
+        return
+    if profile is None:
+        await _send_card(ctx, sender, SCHOOL_PROMPT, cards.school_card())
+        return
     stale = action in {"open_service", "open_form", "submit_form"} and service not in SERVICES
     if not action or stale or action in {"start_over", "open_orchestrator"}:
         narration = "Pick a campus service."
@@ -282,21 +356,21 @@ async def _orchestrator_chat(
             narration = "ResourcePilot works from buttons and forms. Pick a campus service."
         elif stale:
             narration = "That service is not available. Pick a campus service."
-        await _send_card(ctx, sender, narration, cards.welcome_card())
+        await _send_card(ctx, sender, narration, cards.welcome_card(school))
         return
     if action == "open_service" and service in SERVICES:
         await _send_card(
             ctx,
             sender,
             f"Here is how {cards.SERVICE_TITLES[service].lower()} works.",
-            cards.service_overview_card(service),
+            cards.service_overview_card(service, school),
         )
         return
     if action == "open_form" and service in SERVICES:
-        await _send_card(ctx, sender, FORM_PROMPTS[service], cards.service_form(service))
+        await _send_card(ctx, sender, FORM_PROMPTS[service], cards.service_form(service, school))
         return
     if action == "submit_form" and service in SERVICES:
-        await _start_workflow(ctx, sender, service, _form_fields(selection))
+        await _start_workflow(ctx, sender, service, _form_fields(selection), profile=profile)
         return
     if action == "show_bookings":
         await _send_card(
@@ -324,6 +398,11 @@ async def _orchestrator_chat(
         )
         return
     await _workflow_action(ctx, sender, action, selection, state)
+
+
+async def _school(requester: str) -> str:
+    profile = await store.get_profile(requester)
+    return str((profile or {}).get("school_domain") or "")
 
 
 def _option_index(state: dict[str, Any], option_id: str) -> int:
@@ -997,6 +1076,8 @@ async def handle_task_result(ctx: Context, sender: str, result: TaskResult) -> N
     except (KeyError, ValueError) as exc:
         ctx.logger.warning("Ignoring uncorrelated result: %s", exc)
         return
+    if result.ok and result.source_role == "researcher":
+        await _remember_school_name(result.requester, dict(result.payload.get("school") or {}))
     await _audit(
         ctx,
         state,
@@ -1036,7 +1117,7 @@ async def handle_task_result(ctx: Context, sender: str, result: TaskResult) -> N
                 ctx,
                 result.requester,
                 f"I need a bit more detail. {error}.",
-                cards.service_form(service),
+                cards.service_form(service, await _school(result.requester)),
             )
         else:
             await _send_card(ctx, result.requester, error, cards.error_card(error, service=service))

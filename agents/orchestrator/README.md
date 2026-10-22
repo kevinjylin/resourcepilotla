@@ -3,14 +3,15 @@
 <img src="https://raw.githubusercontent.com/kevinjylin/resourcepilotla/main/assets/avatars/orchestrator.jpg" alt="ResourcePilot Orchestrator" width="160">
 
 The ASI:One entrypoint for ResourcePilot: campus help for a student's first weeks, at any US
-school. Every reply is a card: image carousels, illustrated service overviews, native forms,
+school. The first card saves one school domain per requester; every service form reuses it and the
+menu offers **Change school**. Every reply is a card: image carousels, illustrated service overviews, native forms,
 Done/Now/Next agent progress, a wellness choice grid, tappable event lists, detail pages, and a
 native safety review.
 
-- **Study rooms.** Enter your school email and a time. The Campus Researcher finds your library's
+- **Study rooms.** Pick a time. The Campus Researcher finds your saved school's library
   room system, and Campus Rooms shows real open rooms. ResourcePilot re-checks the room you pick
   and hands you the school's booking link; you book with your own sign-in. It is always free.
-- **Health & wellness.** Enter your school email and a time. The hub lets you choose a native room
+- **Health & wellness.** Pick a time. The hub lets you choose a native room
   carousel or a tappable events list. Campus Rooms shows open meditation,
   reflection, sensory, and other wellness rooms from your school's LibCal, and the Campus
   Researcher lists the week's health and wellness events with their RSVP links. Every wellness card

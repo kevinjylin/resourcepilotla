@@ -30,8 +30,10 @@ Capture real evidence for each item. Do not claim an item until you have it.
       carousel, paste-link, error, and specialist status cards all render.
 - [ ] The demo visibly exercises all five official card kinds: `carousel`, `detail`, `form`,
       `review`, and `custom`.
-- [ ] Every reply is a card: free text gets the services menu. `scripts/print_cards.py` validates
-      every payload against the documented card fields.
+- [ ] Every reply is a card: free text gets the school card until one is saved, then the services
+      menu. `scripts/print_cards.py` validates every payload against the documented card fields.
+- [ ] Verified booking, event, rates, housing, and application URLs are tappable markdown links in
+      the message above the card; failed-source links are not promoted.
 - [ ] Card selections carry stable workflow and option IDs. A prose request for a re-check is
       never acted on, and a double click re-checks only once. Both are covered by the tests.
 - [ ] A demo call starts only from **Call now**, and a double press places one call. Show this
@@ -69,6 +71,8 @@ Capture real evidence for each item. Do not claim an item until you have it.
 
 - [ ] Deployed to an always-on host with managed Postgres and outbound https. See
       [agentverse-deployment.md](agentverse-deployment.md).
+- [ ] `make deploy-check` passes; `compose.deploy.yml` publishes no ports and reuses the eight
+      locally connected Mailbox identities.
 - [ ] The profiles answer while your laptop is off.
 
 ## Repository

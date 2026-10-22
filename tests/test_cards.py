@@ -130,6 +130,7 @@ def _metadata(message):
 
 FACTORIES = [
     (cards.welcome_card, "carousel"),
+    (cards.school_card, "custom"),
     (lambda: cards.service_overview_card("rooms"), "detail"),
     (lambda: cards.service_overview_card("wellness"), "detail"),
     (lambda: cards.service_overview_card("housing"), "detail"),
@@ -240,6 +241,9 @@ def test_labels_are_mobile_safe(factory, kind) -> None:
 def test_every_selection_uses_a_known_action(factory, kind) -> None:
     _, payload = factory()
     actions = [selection["action"] for selection in _selections(payload)]
+    if payload.get("root", {}).get("title") == "Planner":
+        assert not actions  # profile status uses a safe markdown link, not an undocumented redirect
+        return
     assert actions
     assert set(actions) <= set(cards.KNOWN_ACTIONS)
 
@@ -248,6 +252,26 @@ def test_terminal_flag_is_a_string() -> None:
     informational = ("custom", {"root": {"type": "text", "value": "All done"}})
     message = cards.card_message("Done", *informational, terminal=True)
     assert _metadata(message)["is_terminal"] == "true"
+
+
+def test_visible_links_are_repeated_as_clickable_markdown() -> None:
+    kind, receipt = cards.room_link_receipt(OPTION)
+    message = cards.card_message("Your verified link.", kind, receipt)
+    text = next(item.text for item in message.content if isinstance(item, TextContent))
+    assert f"]({LINE['handoff_url']})" in text
+    assert cards.card_links(receipt)
+
+    unsafe = {
+        "title": "Sources",
+        "summary_rows": [
+            {"label": "Apply", "value": "https://housing.example.edu/apply"},
+            {"label": "Sources", "value": "Failed: https://evil.example.com"},
+        ],
+        "ctas": [],
+    }
+    links = cards.card_links(unsafe)
+    assert ("Apply", "https://housing.example.edu/apply") in links
+    assert not any(url == "https://evil.example.com" for _, url in links)
 
 
 @pytest.mark.parametrize(
@@ -345,10 +369,22 @@ def test_custom_card_depth_limit() -> None:
         cards.card_message("bad", "custom", {"root": {"children": []}})
     with pytest.raises(ValueError, match="unsupported"):
         cards.card_message("bad", "table", {})
+    bad_action = {
+        "root": {
+            "type": "button",
+            "label": "Go",
+            "action": {
+                "selection": {"action": "start_over"},
+                "redirect": "https://asi1.ai/",
+            },
+        }
+    }
+    with pytest.raises(ValueError, match="only a selection"):
+        cards.card_message("bad", "custom", bad_action)
 
 
 def test_services_menu_offers_four_services_and_bookings() -> None:
-    kind, menu = cards.welcome_card()
+    kind, menu = cards.welcome_card("purdue.edu")
     assert kind == "carousel"
     assert [item["id"] for item in menu["items"]] == [
         "service-rooms",
@@ -356,6 +392,7 @@ def test_services_menu_offers_four_services_and_bookings() -> None:
         "service-housing",
         "service-emergency",
         "service-bookings",
+        "change-school",
     ]
     assert list(_selections(menu)) == [
         {"action": "open_service", "service": "rooms"},
@@ -363,6 +400,7 @@ def test_services_menu_offers_four_services_and_bookings() -> None:
         {"action": "open_service", "service": "housing"},
         {"action": "open_service", "service": "emergency"},
         {"action": "show_bookings"},
+        {"action": "change_school"},
     ]
     text = json.dumps(menu).lower()
     assert "study rooms" in text
@@ -374,9 +412,10 @@ def test_services_menu_offers_four_services_and_bookings() -> None:
 
 @pytest.mark.parametrize("service", ["rooms", "wellness", "housing", "emergency"])
 def test_service_overview_bridges_menu_to_native_form(service) -> None:
-    kind, overview = cards.service_overview_card(service)
+    kind, overview = cards.service_overview_card(service, "purdue.edu")
     assert kind == "detail"
     assert overview["hero_image"] == cards.art(f"svc-{service}")
+    assert overview["summary_rows"][0] == {"label": "School", "value": "purdue.edu"}
     assert [cta["selection"] for cta in overview["ctas"]] == [
         {"action": "open_form", "service": service},
         {"action": "start_over"},
@@ -399,11 +438,18 @@ def test_every_form_submits_its_own_service(service) -> None:
     assert cards.card_buttons(form) == [
         (form_label(service), {"action": "submit_form", "service": service})
     ]
-    email = [field for field in fields if field["name"] == "email"]
-    # The demo drill needs no school email, and no form ever asks for a phone number.
-    assert len(email) == (0 if service == "emergency" else 1)
+    # The school was set once on the menu; service forms never ask for it again.
+    assert not [field for field in fields if field["name"] == "email"]
     assert not [field for field in fields if "phone" in field["name"]]
-    assert all(field["required"] is True for field in email)
+
+
+def test_school_card_keeps_the_email_out_of_service_forms() -> None:
+    kind, school = cards.school_card()
+    assert kind == "custom"
+    assert [field["name"] for field in cards.card_inputs(school)] == ["email"]
+    assert cards.card_buttons(school) == [("Save my school", {"action": "set_school"})]
+    _, change = cards.school_card("purdue.edu")
+    assert cards.card_buttons(change)[-1] == cards.MAIN_MENU
 
 
 def form_label(service: str) -> str:
@@ -418,7 +464,7 @@ def form_label(service: str) -> str:
 def test_rooms_form_offers_days_windows_durations_and_group_size() -> None:
     _, form = cards.rooms_form(upcoming_days(NOW))
     fields = {field["name"]: field for field in cards.card_inputs(form)}
-    assert list(fields) == ["email", "day", "window", "duration", "group_size"]
+    assert list(fields) == ["day", "window", "duration", "group_size"]
     assert fields["day"]["options"][0] == {"value": "2026-10-21", "label": "Today"}
     assert [option["value"] for option in fields["window"]["options"]] == [
         "morning",
@@ -582,6 +628,8 @@ def test_progress_card_marks_finished_and_current_stages() -> None:
 
 def test_known_actions_cover_the_room_and_demo_call_flows_only() -> None:
     assert set(cards.KNOWN_ACTIONS) == {
+        "set_school",
+        "change_school",
         "start_over",
         "open_service",
         "open_form",
@@ -603,7 +651,7 @@ def test_known_actions_cover_the_room_and_demo_call_flows_only() -> None:
         "open_orchestrator",
     }
     assert set(cards.PROSE_ACTIONS) <= set(cards.KNOWN_ACTIONS)
-    consequential = {"submit_form", "recheck_room", "submit_link", "place_call"}
+    consequential = {"set_school", "submit_form", "recheck_room", "submit_link", "place_call"}
     assert not consequential & set(cards.PROSE_ACTIONS)
 
 
@@ -682,7 +730,7 @@ def test_wellness_card_always_carries_the_crisis_line() -> None:
     assert form_kind == "form"
     assert "988" in form["title"]
     names = {field["name"] for field in cards.card_inputs(form)}
-    assert names == {"email", "day", "window", "duration"}
+    assert names == {"day", "window", "duration"}
 
 
 def test_wellness_hub_choice_grid_routes_to_rooms_and_events() -> None:

@@ -11,8 +11,9 @@
 6. Open each profile chat and check that it answers with its status card.
 
 Agents send each other messages through their Mailboxes, so all eight must be connected before a
-request can complete. The Agentverse Basic plan allows 8 Mailbox agents, so all eight fit on it
-exactly, with none to spare. Check the current plan limits on Agentverse before you add an agent.
+request can complete. Check the current Mailbox limit on your Agentverse plan before connecting
+them. If Inspector cannot reach a local agent in a recent Chrome release, allow Local Network
+Access for the Agentverse site, then retry once.
 
 Upgrading from the 15-agent version? Keep your `.env`. The agents keep their seeds, so their
 addresses and profiles stay the same. `make verify` names the leftover settings for agents that no
@@ -33,25 +34,43 @@ Mailbox relays and queues messages for a local agent. It does not keep a sleepin
 
 ## A persistent submission
 
-The track rewards agents that keep running after the event. To get there:
+Mailbox queues messages for an unavailable runtime; it does not run Python for a sleeping laptop.
+For a real always-on submission, first connect all eight Mailboxes locally, then deploy the same
+seeds with the production Compose file:
 
-- Deploy the Compose stack to an always-on host. Keep the same eight seeds so the addresses do not
-  change, and keep the seeds and the ElevenLabs settings in the host's secret manager.
+```bash
+# On an always-on Docker host, with the ignored .env copied through a secret channel:
+export RESOURCEPILOT_DATABASE_URL='postgresql://...managed-postgres...'
+make deploy-check
+make deploy-up
+docker compose -f compose.deploy.yml ps
+```
+
+`compose.deploy.yml` intentionally has no local Postgres container and publishes no ports. Each
+agent receives through its already-connected Mailbox using outbound https. The local
+`docker-compose.yml` remains the Inspector/bootstrap environment and binds every published port to
+loopback only.
+
+- Keep the same eight seeds so addresses and profile ownership do not change. Store the ignored
+  `.env`, `RESOURCEPILOT_DATABASE_URL`, and ElevenLabs settings in the host's secret manager.
+- Use managed Postgres with TLS and backups. `RESOURCEPILOT_DATABASE_URL` is mapped to the agents'
+  `DATABASE_URL`; startup fails instead of silently using process-local memory when it is missing.
 - Allow outbound https. The Campus Researcher, Campus Rooms, and Verification read IPEDS (the
   Urban Institute Education Data API), schools' websites, and LibCal. They need no API keys. The
   Emergency Dispatcher calls the ElevenLabs API and needs `ELEVENLABS_API_KEY`.
 - Card pictures load in the student's browser from `CARD_IMAGE_BASE`, this repository's
   `assets/` by default. If you deploy from a fork, push `assets/` and point it there, or leave it
   empty to send cards without images.
-- Use managed Postgres with backups, and point `DATABASE_URL` at it.
-- Re-open every profile after deploying, then test a chat, a study-room search through the
-  re-check, a housing lookup, and **My bookings**.
+- Check `make deploy-logs`, re-open every profile after deploying, then test the first school card,
+  a study-room search through the re-check, a tappable booking link, a housing lookup, and
+  **My bookings**.
 - Capture the shared ASI:One chat link with the Orchestrator and all eight profile links for
   Devpost.
 
-Hosted Agentverse agents have different process and state constraints. Do not assume this
-multi-process stack runs there unchanged. Port each runtime, test it, and document the path you
-actually used.
+Do not upload this repository unchanged as one Agentverse Hosted Agent. It is eight independent
+processes plus `asyncpg`, live-network dependencies, and shared Postgres. The supported path here
+is eight external, always-on mailbox runtimes. A Hosted Agent port would require packaging and
+testing each role separately and retaining the same shared-store and protocol behavior.
 
 ## Manual steps are intentional
 

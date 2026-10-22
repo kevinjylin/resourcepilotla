@@ -103,7 +103,8 @@ ElevenLabs API (section 6). The web page rules:
   port or user info and at most 400 characters. A hall's photo is already limited to an
   `og:image` on the school's domain. ResourcePilot never fetches an image itself, so a photo
   cannot reach an internal address through the agents.
-- **Health.** The wellness form asks only for the school email, a day, and a duration. Nothing
+- **Health.** The wellness form reuses the saved school domain and asks only for a day, time
+  window, and duration. Nothing
   about a student's health is asked, stored, or logged, and ResourcePilot books no health or
   counseling appointments. The 988 and 911 crisis line is static text on every wellness card and
   on the menu, so it shows even when nothing at the school can be found.

@@ -74,7 +74,7 @@ def _require_domain(fields: dict[str, Any], purpose: str) -> str:
         raise ValueError("Missing: a valid school email, for example you@purdue.edu")
     domain = str(fields.get("school_domain") or "").strip().lower()
     if not domain:
-        raise ValueError(f"Missing: your school email {purpose}")
+        raise ValueError(f"Missing: your school, set from the menu, {purpose}")
     return school_domain(domain)
 
 

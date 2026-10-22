@@ -5,7 +5,8 @@
 Runs the emergency **demo drill**. A student picks **Emergency (demo)** in the ResourcePilot
 Orchestrator's menu and fills in a short form: what kind of emergency (medical, fire or smoke,
 someone in danger, or other), where on campus, how many people need help, optional details,
-whether they are safe, an optional school name, and an explicit demo-only acknowledgement.
+whether they are safe, and an explicit demo-only acknowledgement. The Orchestrator supplies the
+saved school; the form cannot change it.
 
 1. **Preview.** The Orchestrator sends this agent a `phase="preview"` task. It validates the form,
    removes email addresses, caps free text, and returns the review data. The native review card shows the

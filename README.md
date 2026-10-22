@@ -13,9 +13,10 @@ detail pages, and safety reviews.
 | **Emergency (demo)** | A demo-drill phone call in which the voice, speaking as the student, reports an emergency to your team's demo contact, never 911, then the call's summary and transcript | ElevenLabs voice agent over your own Twilio number or SIP trunk (e.g. Telnyx) |
 | **My bookings** | Your recent re-checked rooms and their booking links | ResourcePilot's workflow records |
 
-Study rooms work for **any US school**, not only one campus. You enter your school email. Intake
-keeps only the domain, and the Campus Researcher matches it to the school in IPEDS. It then finds
-the library's room-booking system:
+Study rooms work for **any US school**, not only one campus. The first card asks for your school
+email once. The Orchestrator discards the local part, saves only the domain, and reuses it
+server-side for every service; **Change school** on the menu replaces it. The Campus Researcher
+matches that domain to the school in IPEDS, then finds the library's room-booking system:
 
 - a hand-checked list;
 - a `<school>.libcal.com` probe;
@@ -46,8 +47,11 @@ This repository uses public Fetch.ai packages and documentation only.
 
 Every reply in ASI:One is an interactive card:
 
+- The first custom card sets your school once and explains exactly what is retained. The menu
+  shows the saved domain and offers **Change school**.
 - The menu is a native image carousel. Each service opens an illustrated detail page before its
   native ASI:One form, so the experience keeps both strong visuals and polished form controls.
+  Service forms do not ask for the email again.
 - Wellness opens as a dashboard with static 988/911 guidance, live result counts, and a
   `choice_grid` for rooms or events. Rooms use a carousel; event list rows open verified detail
   pages with the official RSVP link.
@@ -59,7 +63,13 @@ Every reply in ASI:One is an interactive card:
   picture when the school has none.
 - My bookings is a carousel that reopens any saved booking-link card.
 - Emergency uses an illustrated safety overview, a native form and native review gate, then a
-  transcript card. Every step says it is a demo that does not contact 911 or campus police.
+  transcript card. The voice plays the caller, answers from the form only, and hangs up after the
+  dispatcher has what they need. Every step says it is a demo that does not contact 911 or campus
+  police.
+
+ASI:One card values are plain text, so each verified https link is also repeated as safe markdown
+in the chat bubble above its card. Booking, RSVP, housing, rates, and application links are
+therefore tappable; links named only in a failed `Sources` check are never promoted.
 
 The art is drawn in code by `scripts/make_card_art.py` and served from this public repository; the
 student's browser loads it, and ResourcePilot never fetches an image itself.
@@ -93,9 +103,9 @@ another agent in your `.env` (older layouts used 8007 for Memory and Audit), it 
 free port.
 
 Then connect the agents to Agentverse. Open every Inspector link that `make profiles` prints, and
-connect each of the eight agents with **Mailbox**. The Agentverse Basic plan allows 8 Mailbox
-agents, so all eight fit exactly. This is an account-bound step that you must do yourself in the
-browser. See [docs/agentverse-deployment.md](docs/agentverse-deployment.md).
+connect each of the eight agents with **Mailbox**. Check your current Agentverse plan's Mailbox
+limit first. This is an account-bound step that you must do yourself in the browser. See
+[docs/agentverse-deployment.md](docs/agentverse-deployment.md).
 
 ## The agents
 
@@ -116,8 +126,8 @@ profile chat answers with a status card that names its role and points to the Or
 
 The Orchestrator delegates every step with `ctx.send` and correlated `TaskRequest`/`TaskResult`
 messages: workflow, request, requester, and session IDs, plus deadlines and duplicate protection.
-Postgres is the shared durable store for workflows, the audit timeline, one-time claims, and the
-cache of public lookups.
+Postgres is the shared durable store for workflows, the requester's saved school domain, the audit
+timeline, one-time claims, and the cache of public lookups.
 
 ## How each service flows
 
@@ -148,7 +158,8 @@ My bookings   Orchestrator ─▶ recent rooms carousel ─▶ saved booking-lin
 ```
 
 Every arrow between agents is a `TaskRequest` sent with `ctx.send` and answered by a `TaskResult`.
-Requests start only from a form; free text gets the services menu. Details are in
+Requests start only from a form; until a school is saved every message gets the school card, and
+after that free text gets the services menu. Details are in
 [docs/architecture.md](docs/architecture.md).
 
 ## Trust: why the Orchestrator may send you to a link
@@ -194,7 +205,17 @@ make verify             # check .env identities and the Compose file
 make check              # format, lint, type-check, and tests
 make build              # build the Docker image
 make stop
+
+# On an always-on Docker host, after connecting all Mailboxes locally:
+export RESOURCEPILOT_DATABASE_URL='postgresql://...managed-postgres...'
+make deploy-check
+make deploy-up
 ```
+
+`compose.deploy.yml` runs the same eight identities continuously, uses managed Postgres, and
+publishes no host ports. Once Mailboxes are connected, the agents work while your laptop is off;
+Agentverse queues messages but does not execute an offline local process. See the deployment guide
+for the manual profile and ASI:One steps that cannot be automated.
 
 `uv run python scripts/make_card_art.py` redraws the card art and agent avatars (it needs Chrome).
 `uv run python scripts/print_cards.py` prints every card payload, validated exactly as the agents

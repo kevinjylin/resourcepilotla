@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap bootstrap-missing start stop logs profiles verify test lint typecheck check build
+.PHONY: setup bootstrap bootstrap-missing start stop logs profiles verify test lint typecheck check build deploy-check deploy-up deploy-logs deploy-down
 
 setup:
 	uv sync
@@ -27,6 +27,7 @@ profiles:
 verify:
 	uv run python scripts/verify_config.py
 	docker compose config --quiet
+	RESOURCEPILOT_DATABASE_URL=postgresql://verify:verify@db.example:5432/resourcepilot docker compose -f compose.deploy.yml config --quiet
 
 test:
 	uv run pytest
@@ -42,3 +43,15 @@ check: lint typecheck test
 
 build:
 	docker build -t resourcepilot-la .
+
+deploy-check:
+	docker compose -f compose.deploy.yml config --quiet
+
+deploy-up: deploy-check
+	docker compose -f compose.deploy.yml up --build -d
+
+deploy-logs:
+	docker compose -f compose.deploy.yml logs -f
+
+deploy-down:
+	docker compose -f compose.deploy.yml down

@@ -44,7 +44,7 @@ from resourcepilot.research import WINDOWS
 CARD_LIMIT_BYTES = 64 * 1024
 CUSTOM_CARD_MAX_DEPTH = 8
 CARD_KINDS = {"carousel", "detail", "form", "review", "custom"}
-ASI_ONE_URL = "https://asi1.ai/"
+AGENTVERSE_PROFILE = "https://agentverse.ai/agents/details/{address}/profile"
 # Card art is served from this public repository; an empty or non-https base turns images off.
 DEFAULT_IMAGE_BASE = "https://raw.githubusercontent.com/kevinjylin/resourcepilotla/main/assets/"
 # Every name is assets/cards/<name>.jpg (1200x675), drawn from assets/src/<name>.svg.
@@ -126,6 +126,8 @@ CHOICE_FIELDS = {"value", "label", "image"}
 
 # Every action a card selection can carry; the Orchestrator routes exactly these.
 KNOWN_ACTIONS = (
+    "set_school",
+    "change_school",
     "start_over",
     "open_service",
     "open_form",
@@ -169,6 +171,8 @@ SERVICE_TITLES = {
     "housing": "Campus housing",
     "emergency": "Emergency (demo)",
 }
+SCHOOL_SERVICES = ("rooms", "wellness", "housing")
+MAIN_MENU = ("Main menu", {"action": "start_over"})
 # Static on purpose: crisis help never depends on a crawl, a feed, or a school being found.
 CRISIS_TEXT = (
     "In crisis? Call or text 988, the Suicide & Crisis Lifeline, any time. "
@@ -226,6 +230,13 @@ def _check_custom_fields(element: dict[str, Any]) -> None:
         for item in element.get("items") or []:
             if set(item) - LIST_ITEM_FIELDS:
                 raise ValueError("undocumented field(s) on list item")
+            action = item.get("action")
+            if action is not None and (
+                not isinstance(action, dict)
+                or set(action) != {"selection"}
+                or not isinstance(action.get("selection"), dict)
+            ):
+                raise ValueError("list item action must contain only a selection object")
             for child in _typed_elements(item.get("children")):
                 _check_custom_fields(child)
     if kind == "choice_grid":
@@ -237,6 +248,14 @@ def _check_custom_fields(element: dict[str, Any]) -> None:
                 raise ValueError("undocumented field(s) on choice_grid choice")
     if kind == "input" and element.get("kind") == "select" and not element.get("options"):
         raise ValueError("select input requires non-empty options")
+    if kind == "button":
+        action = element.get("action")
+        if (
+            not isinstance(action, dict)
+            or set(action) != {"selection"}
+            or not isinstance(action.get("selection"), dict)
+        ):
+            raise ValueError("button action must contain only a selection object")
 
 
 def _validate_custom_payload(payload: dict[str, Any]) -> None:
@@ -290,6 +309,78 @@ def _validate_predefined(kind: str, payload: dict[str, Any]) -> None:
             raise ValueError("select field requires non-empty options")
 
 
+# Card values are plain text in ASI:One. Repeat intended links in the markdown-capable chat
+# bubble so official booking, event, housing, and application links are actually tappable.
+LINK_RE = re.compile(r"https://[^\s<>\"'()\[\]]+")
+LINK_LIMIT = 12
+UNLINKED_LABELS = frozenset({"Sources", "Source"})
+_MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()<>#!|~])")
+
+
+def _link_label(text: str) -> str:
+    """Return a capped, escaped label; untrusted page text never becomes markdown."""
+    text = " ".join(text.split())[:80]
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
+
+
+def _urls(value: str) -> list[tuple[str, str]]:
+    found = []
+    for match in LINK_RE.finditer(value):
+        url = match.group(0).rstrip(".,;:!?")
+        prefix = value[: match.start()].split(";")[-1].strip().rstrip(":").strip()
+        found.append((prefix, url))
+    return found
+
+
+def card_links(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    """Collect visible user-facing links, excluding images, selections, and failed sources."""
+    links: list[tuple[str, str]] = []
+
+    def add(label: str, url: str) -> None:
+        if url not in {known for _, known in links}:
+            links.append((label or "Link", url))
+
+    for row in payload.get("summary_rows", []):
+        if row["label"] in UNLINKED_LABELS:
+            continue
+        for prefix, url in _urls(row["value"]):
+            add(prefix or row["label"], url)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            context = ""
+            for child in node:
+                if isinstance(child, dict) and child.get("type") == "text":
+                    value = str(child.get("value") or "")
+                    urls = _urls(value)
+                    for prefix, url in urls:
+                        add(
+                            f"{prefix} · {context}" if prefix and context else prefix or context,
+                            url,
+                        )
+                    if not urls and child.get("style") != "muted":
+                        context = value
+                else:
+                    walk(child)
+        elif isinstance(node, dict):
+            for key in ("root", "children", "items"):
+                if key in node:
+                    walk(node[key])
+
+    if "root" in payload:
+        walk([payload["root"]])
+    return links[:LINK_LIMIT]
+
+
+def with_links(narration: str, payload: dict[str, Any]) -> str:
+    """Append each visible card link as safe, clickable markdown."""
+    links = card_links(payload)
+    if not links:
+        return narration
+    lines = "\n".join(f"- [{_link_label(label)}]({url})" for label, url in links)
+    return f"{narration}\n\n{lines}" if narration else lines
+
+
 def card_message(
     narration: str, kind: str, payload: dict[str, Any], *, terminal: bool = False
 ) -> ChatMessage:
@@ -317,7 +408,7 @@ def card_message(
         timestamp=datetime.now(UTC),
         msg_id=uuid4(),
         content=[
-            TextContent(type="text", text=narration),
+            TextContent(type="text", text=with_links(narration, payload)),
             MetadataContent(type="metadata", metadata=metadata),
         ],
     )
@@ -376,6 +467,11 @@ def card_buttons(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
             return
         if node.get("type") == "button":
             found.append((str(node["label"]), dict(node["action"]["selection"])))
+        if node.get("type") == "list":
+            for item in node.get("items") or []:
+                action = item.get("action") if isinstance(item, dict) else None
+                if isinstance(action, dict) and isinstance(action.get("selection"), dict):
+                    found.append(("List item", dict(action["selection"])))
         if node.get("type") == "list":
             for item in node.get("items") or []:
                 action = item.get("action") if isinstance(item, dict) else None
@@ -508,16 +604,12 @@ def status_card(
     children.extend({"type": "text", "value": fact, "style": "muted"} for fact in facts or [])
     children.append(
         {
-            "type": "button",
-            "label": "Use ResourcePilot",
-            "primary": True,
-            "action": {
-                "selection": {
-                    "action": "open_orchestrator",
-                    "agent_address": orchestrator_address,
-                },
-                "redirect": ASI_ONE_URL,
-            },
+            "type": "text",
+            "value": (
+                "Open the ResourcePilot Orchestrator profile: "
+                + AGENTVERSE_PROFILE.format(address=orchestrator_address)
+            ),
+            "style": "body",
         }
     )
     children.extend(extra_buttons or [])
@@ -560,8 +652,8 @@ SERVICES_MENU = (
 )
 
 
-def welcome_card() -> tuple[str, dict[str, Any]]:
-    """The native, image-rich service picker shown at the start of every conversation."""
+def welcome_card(school: str = "") -> tuple[str, dict[str, Any]]:
+    """The native service picker, using the school saved once for the requester."""
     items = [
         {
             "id": f"service-{service}",
@@ -591,9 +683,28 @@ def welcome_card() -> tuple[str, dict[str, Any]]:
             },
         }
     )
+    if school:
+        items.append(
+            {
+                "id": "change-school",
+                **_item_image("menu-banner"),
+                "title": "Change school",
+                "subtitle": f"ResourcePilot is currently using {school} for every campus service.",
+                "secondary_text": "Saved school",
+                "badges": [{"label": school, "variant": "info"}],
+                "primary_cta": {
+                    "label": "Change",
+                    "selection": {"action": "change_school"},
+                },
+            }
+        )
     return "carousel", {
         "title": "ResourcePilot campus services",
-        "subtitle": f"Live campus help at any US school. {CRISIS_TEXT}",
+        "subtitle": (
+            f"Using {school} for live campus help. {CRISIS_TEXT}"
+            if school
+            else f"Live campus help at any US school. {CRISIS_TEXT}"
+        ),
         "items": items,
     }
 
@@ -626,21 +737,22 @@ SERVICE_OVERVIEW_ROWS = {
 }
 
 
-def service_overview_card(service: str) -> tuple[str, dict[str, Any]]:
+def service_overview_card(service: str, school: str = "") -> tuple[str, dict[str, Any]]:
     """A native detail page bridges the visual menu to the service's native form."""
     selected = service if service in SERVICE_TITLES else "rooms"
     payload = {
         "title": SERVICE_TITLES[selected],
-        "summary_rows": [
-            {"label": label, "value": value} for label, value in SERVICE_OVERVIEW_ROWS[selected]
-        ],
+        "summary_rows": (
+            ([{"label": "School", "value": school}] if school else [])
+            + [{"label": label, "value": value} for label, value in SERVICE_OVERVIEW_ROWS[selected]]
+        ),
         "ctas": [
             {
                 "label": "Set preferences",
                 "primary": True,
                 "selection": {"action": "open_form", "service": selected},
             },
-            {"label": "All services", "selection": {"action": "start_over"}},
+            {"label": MAIN_MENU[0], "selection": MAIN_MENU[1]},
         ],
     }
     return _with_hero(("detail", payload), f"svc-{selected}", SERVICE_TITLES[selected])
@@ -655,12 +767,15 @@ def notice_card(
     buttons: list[tuple[str, dict[str, Any]]] | None = None,
     image: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """A short message card; its picture is a warning or an info hero unless one is given."""
+    """A short message card with a guaranteed route back to the services menu."""
     children: list[dict[str, Any]] = []
     if badge:
         children.append({"type": "badge", "label": badge, "variant": variant})
     children.append({"type": "text", "value": body, "style": "body"})
-    children.append(_buttons(buttons or [("Start over", {"action": "start_over"})]))
+    actions = list(buttons or [])
+    if not any(selection == MAIN_MENU[1] for _, selection in actions):
+        actions.append(MAIN_MENU)
+    children.append(_buttons(actions))
     return _with_hero(
         ("custom", {"root": {"type": "section", "title": title, "children": children}}),
         image or ("hero-warning" if variant == "warning" else "hero-info"),
@@ -671,7 +786,9 @@ def error_card(message: str, *, service: str | None = None) -> tuple[str, dict[s
     actions: list[tuple[str, dict[str, Any]]] = []
     if service in SERVICE_TITLES:
         actions.append(("Open the form", {"action": "open_form", "service": service}))
-    actions.append(("Start over", {"action": "start_over"}))
+    if service in SCHOOL_SERVICES:
+        actions.append(("Change school", {"action": "change_school"}))
+    actions.append(MAIN_MENU)
     return notice_card(
         "ResourcePilot", message, badge="Needs attention", variant="warning", buttons=actions
     )
@@ -700,6 +817,54 @@ def _email_field() -> dict[str, Any]:
     return {"name": "email", "kind": "text", "label": "School email", "required": True}
 
 
+def school_card(current: str = "", *, error: str = "") -> tuple[str, dict[str, Any]]:
+    """Set the school once; only the email domain survives form scrubbing and storage."""
+    children: list[dict[str, Any]] = [
+        *_image("menu-banner", "ResourcePilot campus services"),
+    ]
+    if error:
+        children.extend(
+            [
+                {"type": "badge", "label": "Needs attention", "variant": "warning"},
+                {"type": "text", "value": error, "style": "body"},
+            ]
+        )
+    children.extend(
+        [
+            {
+                "type": "text",
+                "value": (
+                    f"ResourcePilot currently uses {current}. Enter another school email to switch."
+                    if current
+                    else "Enter your school email once. Every campus service will reuse it."
+                ),
+                "style": "body",
+            },
+            {
+                "type": "text",
+                "value": "Only the domain is kept, such as purdue.edu. The part before @ is "
+                "discarded before storage.",
+                "style": "muted",
+            },
+            {"type": "input", **_email_field()},
+            _buttons(
+                [
+                    ("Save my school", {"action": "set_school"}),
+                    *([MAIN_MENU] if current else []),
+                ]
+            ),
+            {"type": "text", "value": CRISIS_TEXT, "style": "muted"},
+        ]
+    )
+    return "custom", {
+        "root": {
+            "type": "section",
+            "title": "Change your school" if current else "Set your school",
+            "children": children,
+        }
+    }
+
+
 def _day_options(days: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return [(value, "Today" if index == 0 else text) for index, (value, text) in enumerate(days)]
 
@@ -709,7 +874,6 @@ def rooms_form(days: list[tuple[str, str]] | None = None) -> tuple[str, dict[str
     return "form", {
         "title": "Find a study room at your school",
         "fields": [
-            _email_field(),
             _select("day", "Day", _day_options(days or upcoming_days()), required=True),
             _select(
                 "window",
@@ -728,11 +892,10 @@ def rooms_form(days: list[tuple[str, str]] | None = None) -> tuple[str, dict[str
 
 
 def wellness_form(days: list[tuple[str, str]] | None = None) -> tuple[str, dict[str, Any]]:
-    """No health questions: only the school, a day, and how long a quiet room is needed."""
+    """No health questions: only a day and how long a quiet room is needed."""
     return "form", {
         "title": "Health & wellness · crisis: 988 · emergency: 911",
         "fields": [
-            _email_field(),
             _select("day", "Day", _day_options(days or upcoming_days()), required=True),
             _select(
                 "window",
@@ -777,7 +940,6 @@ def emergency_form() -> tuple[str, dict[str, Any]]:
             _select("people", "People who need help", [(str(n), str(n)) for n in range(1, 11)]),
             {"name": "details", "kind": "text", "label": "Anything else (optional)"},
             _select("caller_safe", "Are you safe right now?", [("yes", "Yes"), ("no", "No")]),
-            {"name": "school", "kind": "text", "label": "School (optional)"},
             {
                 "name": "demo_only",
                 "kind": "checkbox",
@@ -793,7 +955,7 @@ def emergency_form() -> tuple[str, dict[str, Any]]:
 
 
 def housing_form() -> tuple[str, dict[str, Any]]:
-    """The school plus the criteria the Planner matches each hall against."""
+    """The criteria the Planner matches each hall against at the saved school."""
     must_haves = [
         {"name": f"need_{key}", "kind": "checkbox", "label": label}
         for key, label in HOUSING_FEATURES.items()
@@ -801,7 +963,6 @@ def housing_form() -> tuple[str, dict[str, Any]]:
     return "form", {
         "title": "On-campus housing at your school",
         "fields": [
-            _email_field(),
             _select("who", "I am a", list(HOUSING_WHO.items()), required=True),
             _select("style", "Housing style", list(HOUSING_STYLES.items())),
             *must_haves,
@@ -818,15 +979,20 @@ def housing_form() -> tuple[str, dict[str, Any]]:
     }
 
 
-def service_form(service: str) -> tuple[str, dict[str, Any]]:
-    """The form for one service; an unknown service gets the rooms form, like the chains."""
+def service_form(service: str, school: str = "") -> tuple[str, dict[str, Any]]:
+    """The native form for one service at the requester's saved school."""
     if service == "housing":
-        return housing_form()
-    if service == "wellness":
-        return wellness_form()
-    if service == "emergency":
-        return emergency_form()
-    return rooms_form()
+        card = housing_form()
+    elif service == "wellness":
+        card = wellness_form()
+    elif service == "emergency":
+        card = emergency_form()
+    else:
+        card = rooms_form()
+    if school:
+        kind, payload = card
+        return kind, {**payload, "title": f"{payload['title']} · {school}"}
+    return card
 
 
 def room_link_card(workflow_id: str, school: str) -> tuple[str, dict[str, Any]]:

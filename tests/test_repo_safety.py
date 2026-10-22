@@ -93,6 +93,9 @@ def test_documented_make_commands_exist() -> None:
 
 def test_school_email_is_reduced_to_a_domain_in_the_orchestrator() -> None:
     runtime = (ROOT / "agents" / "run.py").read_text()
-    # Every form submission passes through scrub_fields before a workflow is created.
+    # The school card is scrubbed once, then the saved domain is injected server-side.
     assert "return scrub_fields(fields)" in runtime
-    assert "_start_workflow(ctx, sender, service, _form_fields(selection))" in runtime
+    assert 'if action == "set_school":' in runtime
+    assert '"school_domain": domain, "school_name": school_name' in runtime
+    assert 'fields["school_domain"] = domain' in runtime
+    assert "_form_fields(selection), profile=profile" in runtime

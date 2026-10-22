@@ -18,18 +18,20 @@ Before recording:
 
 The optional steps add about a minute.
 
-## 1. The services menu (15 s)
+## 1. Set the school and open the services menu (20 s)
 
-Say "hi". The Orchestrator answers with the campus services menu: **Study rooms**, **Health &
-wellness**, **Campus housing**, **Emergency (demo)**, and **My bookings**. The 988 crisis line is
-in the carousel subtitle. Swipe through the service art. Type a sentence instead, and it answers
-with the same menu: every request starts from a card, never an inferred consequential action.
+Say "hi". The Orchestrator first asks for the school. Enter the school email once and point out
+that only its domain is retained. The native carousel then shows **Study rooms**, **Health &
+wellness**, **Campus housing**, **Emergency (demo)**, **My bookings**, and **Change school**. The
+988 crisis line is in the subtitle. Swipe through the service art. Type a sentence instead, and it
+answers with the same menu: every request starts from a card, never an inferred consequential
+action.
 
 ## 2. A real study room at any school (55 s)
 
 Press **Explore** on **Study rooms**. Show the illustrated overview, then press **Set preferences**.
-Enter your school email, a day, a time of day, a duration, and the group size in the native form,
-then press **Find open rooms**.
+The overview names the saved school. Enter a day, a time of day, a duration, and the group size in
+the native form, then press **Find open rooms**.
 
 As the progress relay updates its structured **Done / Now / Next** list, say: "Intake keeps only
 the domain. The Campus Researcher matched
@@ -40,7 +42,8 @@ rooms are open right now, and Verification checks every offer before the Planner
 The carousel shows real rooms, earliest first, each with a **Live · LibCal** badge. Press **View
 room** on one, then **Re-check this room**. Campus Rooms reads that slot again, and the **Your
 booking link** card arrives with the room, the time, and the school's own link. Say: "It's free,
-and ResourcePilot never reserves the room. You book it with your own sign-in."
+and ResourcePilot never reserves the room. You book it with your own sign-in." Open the duplicate
+markdown link above the card to show that links are tappable in ASI:One.
 
 ## 3. A room taken during the re-check (30 s)
 
@@ -58,15 +61,17 @@ uv run pytest tests/test_network.py -k taken -v
 
 ## 4. No booking system found: the paste-link card (25 s)
 
-Press **Find another room** and search with the MIT email. The Researcher finds no system it
+Use **Main menu → Change school** and switch to an MIT email. Start a room search. The Researcher
+finds no system it
 recognizes, so it asks instead of guessing: a card with one field for the room-booking link.
 Paste the library's
 booking link and press **Check this link**. The Researcher checks the pasted link with the same
 rules as one it found itself. Optional: paste a link on another domain first, and the same card
 comes back with the reason.
 
-Optional (30 s): press **Menu**, then **Explore** on **Health & wellness**, review the safety
-overview, and fill the form with a Purdue email. The hub starts with 988 and 911 and shows verified
+Optional (30 s): switch back to Purdue from **Change school**, press **Main menu**, then **Explore**
+on **Health & wellness**, review the safety overview, and fill the form. The hub starts with 988
+and 911 and shows verified
 room/event counts. Select **Events this week** in the choice grid, open it, then tap a list row to
 show its native detail page and official RSVP link. Return to the hub, choose **Open wellness
 rooms**, and show the native room carousel. Say: "It never asks about your health. The crisis line
@@ -74,8 +79,8 @@ is static, so it shows even when a school has nothing to find."
 
 ## 5. Campus housing (25 s)
 
-Press **Menu**, then **Explore** on **Campus housing** and press **Set preferences**. Enter a Purdue,
-Georgia Tech, or UC Riverside email, pick **Incoming first-year**, tick **Air conditioning**, and
+Press **Main menu**, then **Explore** on **Campus housing** and press **Set preferences**. Using the
+saved school, pick **Incoming first-year**, tick **Air conditioning**, and
 press **Find housing**. The carousel
 shows each hall the school lists, matches first, with photos where the school has them. Open one:
 style, who it's for, rooms, features, price, and how it fits each criterion, with the apply link.
@@ -85,7 +90,7 @@ your criteria ruled out, and **Housing facts** for IPEDS numbers and the portal.
 
 ## 6. Optional: Emergency (demo) (30 s)
 
-Put your teammate's phone on speaker, near the microphone. Press **Menu**, then **Explore** on
+Put your teammate's phone on speaker, near the microphone. Press **Main menu**, then **Explore** on
 **Emergency (demo)**. Point out the illustrated demo-only safety page, press **Set preferences**,
 fill the native form, and tick **I understand: demo only**. On the native review card, point at
 "not 911" and the masked number, which shows only the last four digits. Say: "It can only call our
@@ -97,15 +102,15 @@ Say: "One press places one call, and it is never retried. In a real emergency, c
 
 ## 7. My bookings (10 s)
 
-Press **Menu**, then **Open** on **My bookings**. The room from step 2 appears in a carousel. Press
+Press **Main menu**, then **Open** on **My bookings**. The room from step 2 appears in a carousel. Press
 **Open booking** to reconstruct its booking-link detail card.
 
 ## 8. An agent profile chat (15 s)
 
 Open the Campus Rooms profile on Agentverse. Show its README and its Chat and Tasks manifests, then
-send it a message. It answers with its status card, which names its role and has a **Use
-ResourcePilot** button that points back to the Orchestrator. Say: "Eight separate agents, each
-with its own address and job."
+send it a message. It answers with its status card, which names its role and repeats the
+Orchestrator's Agentverse profile as a tappable link above the card. Say: "Eight separate agents,
+each with its own address and job."
 
 ## 9. Close (5 s)
 
