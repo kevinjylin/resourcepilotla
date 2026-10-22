@@ -72,6 +72,23 @@ SAMPLE_HOUSING: dict[str, Any] = {
         "portal_label": "Apply for housing",
     },
 }
+SAMPLE_WELLNESS: dict[str, Any] = {
+    "school": {"school_name": "Example University"},
+    "options": [SAMPLE_OPTIONS[0]],
+    "wellness": {
+        "status": "found",
+        "feed_host": "events.example.edu",
+        "events": [
+            {
+                "title": "Flu shot clinic",
+                "when": "Thursday · 10:00 AM",
+                "location": "Student Center",
+                "url": "https://events.example.edu/flu-clinic",
+                "photo": "",
+            }
+        ],
+    },
+}
 
 # Sample emergency drill data: a masked number only, never a real one.
 SAMPLE_PREVIEW: dict[str, Any] = {
@@ -103,16 +120,39 @@ def show(title: str, card: tuple[str, dict[str, Any]], *, terminal: bool = False
 def samples() -> None:
     show("Campus services menu", cards.welcome_card())
     for service in ("rooms", "wellness", "housing", "emergency"):
+        show(f"{service} overview", cards.service_overview_card(service))
         show(f"{service} form", cards.service_form(service))
     show("Wellness card, nothing found", cards.wellness_card("demo", {}))
+    show("Wellness hub", cards.wellness_card("demo", SAMPLE_WELLNESS))
+    show("Wellness events", cards.wellness_events_card("demo", SAMPLE_WELLNESS))
+    show(
+        "Wellness event detail",
+        cards.wellness_event_detail("demo", SAMPLE_WELLNESS["wellness"]["events"][0]),
+    )
     show("Paste-link fallback", cards.room_link_card("demo", "Example University"))
     chain = ("intake", "researcher", "campus_rooms", "verification", "planner")
     show("Progress", cards.progress_card("demo", "campus_rooms", chain))
     show("Sample open rooms", cards.rooms_carousel("demo", SAMPLE_OPTIONS, "Example University"))
     show("Sample room detail", cards.room_detail("demo", SAMPLE_OPTIONS[0]))
-    show("Sample booking link", cards.room_link_receipt(SAMPLE_OPTIONS[0]), terminal=True)
+    show("Sample booking link", cards.room_link_receipt(SAMPLE_OPTIONS[0]))
     show("Sample housing", cards.housing_card(SAMPLE_HOUSING))
     show("No bookings yet", cards.bookings_card([]))
+    show(
+        "Recent bookings",
+        cards.bookings_card(
+            [
+                {
+                    "workflow_id": "demo",
+                    "service": "rooms",
+                    "option": SAMPLE_OPTIONS[0],
+                    "data": {
+                        "brief": {"service": "rooms"},
+                        "school": {"school_name": "Example University"},
+                    },
+                }
+            ]
+        ),
+    )
     show("Demo call review", cards.emergency_review_card("demo", SAMPLE_PREVIEW))
     show("Demo call placed", cards.emergency_call_card("demo", SAMPLE_CALL))
     show("Demo call checked", cards.emergency_call_card("demo", SAMPLE_CALL, SAMPLE_CALL_STATUS))
@@ -138,7 +178,7 @@ async def live_rooms(domain: str, found: dict[str, Any], rooms_http: Http) -> No
     school = found["school"]["school_name"]
     show(f"Open rooms at {domain}", cards.rooms_carousel("demo", options, school))
     show(f"Room detail at {domain}", cards.room_detail("demo", options[0]))
-    show(f"Booking link at {domain}", cards.room_link_receipt(options[0]), terminal=True)
+    show(f"Booking link at {domain}", cards.room_link_receipt(options[0]))
 
 
 async def live_wellness(domain: str, http: Http, rooms_http: Http) -> None:
@@ -162,6 +202,8 @@ async def live_wellness(domain: str, http: Http, rooms_http: Http) -> None:
         found = verification_handler({**found, "offers": offers}, {})
         found["options"] = plan_room_options(brief, found["offers"])
     show(f"Wellness at {domain}", cards.wellness_card("demo", found))
+    if (found.get("wellness") or {}).get("events"):
+        show(f"Wellness events at {domain}", cards.wellness_events_card("demo", found))
 
 
 async def live(domain: str, http: Http, rooms_http: Http) -> None:

@@ -24,15 +24,20 @@ Capture real evidence for each item. Do not claim an item until you have it.
 
 ## Interactive cards
 
-- [ ] Services menu, the rooms and housing forms, progress, rooms carousel, room detail, booking
-      link, paste-link, housing, emergency review and call, My bookings, error, and status cards
-      all render.
+- [ ] Native service carousel, four illustrated service overviews, native forms, structured
+      Done/Now/Next progress, room and housing carousels, room and event details, wellness choice
+      grid and tappable event list, native emergency review, call transcript, recent-bookings
+      carousel, paste-link, error, and specialist status cards all render.
+- [ ] The demo visibly exercises all five official card kinds: `carousel`, `detail`, `form`,
+      `review`, and `custom`.
 - [ ] Every reply is a card: free text gets the services menu. `scripts/print_cards.py` validates
       every payload against the documented card fields.
 - [ ] Card selections carry stable workflow and option IDs. A prose request for a re-check is
       never acted on, and a double click re-checks only once. Both are covered by the tests.
 - [ ] A demo call starts only from **Call now**, and a double press places one call. Show this
       in the tests, which mock ElevenLabs.
+- [ ] Describe progress honestly as sequential cards at real specialist handoffs, not as an
+      unsupported CSS/GIF/ASCII animation.
 
 ## Reliability and error recovery
 

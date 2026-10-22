@@ -3,19 +3,20 @@
 ResourcePilot offers four campus services from a menu: free study rooms at the student's own
 school, health and wellness (quiet rooms, the week's wellness events, and the 988 crisis line),
 campus housing facts with official links, and an emergency demo drill that phones one teammate,
-never 911. Every reply is a card: the menu, a short form,
-progress, a carousel of open rooms, the wellness card, a room detail, the booking-link receipt,
-the housing card, and recent bookings. ResourcePilot never reserves a room or applies for
-housing, so no card asks for payment.
+never 911. Every reply is a card: an image carousel, illustrated service overview, native form,
+live agent relay, selectable results, detail and review screens, wellness choice grid, tappable
+events, and recent-booking carousel. ResourcePilot never reserves a room or applies for housing,
+so no card asks for payment.
 
 Every payload uses only the fields documented on the Innovation Lab interactive-cards page.
 ASI:One silently falls back to plain text when a payload has an unexpected shape, so
 ``card_message`` rejects anything else before it is sent. Selections carry stable workflow and
 option IDs; the prose fallback in ``parse_selection`` only opens menus and views.
 
-Cards carry pictures from ``assets/cards`` in this public repository (``CARD_IMAGE_BASE``).
-Predefined forms and reviews cannot show an image, so forms and the demo-call review are custom
-cards with the same field names and selections. With images off, every card is still valid.
+Visual cards carry pictures from ``assets/cards`` in this public repository (``CARD_IMAGE_BASE``).
+Native forms and reviews intentionally follow illustrated detail screens: predefined schemas get
+ASI:One's polished controls while the preceding screen supplies the art and safety context. With
+images off, every card is still valid.
 """
 
 from __future__ import annotations
@@ -121,17 +122,22 @@ CUSTOM_FIELDS = {
     "choice_grid": {"type", "name", "choices", "multi"},
 }
 LIST_ITEM_FIELDS = {"children", "action"}
+CHOICE_FIELDS = {"value", "label", "image"}
 
 # Every action a card selection can carry; the Orchestrator routes exactly these.
 KNOWN_ACTIONS = (
     "start_over",
     "open_service",
+    "open_form",
     "submit_form",
     "show_bookings",
+    "show_booking",
     "show_status",
     "view_room",
     "recheck_room",
     "show_results",
+    "show_wellness_view",
+    "view_wellness_event",
     "submit_link",
     "view_housing",
     "show_housing_facts",
@@ -140,13 +146,11 @@ KNOWN_ACTIONS = (
     "call_status",
     "open_orchestrator",
 )
-# A card offering any of these waits for the student, so it can never be marked terminal.
-INPUT_ACTIONS = frozenset({"submit_form", "submit_link", "recheck_room", "place_call"})
 # Bounded allowlist for planner-mediated prose: it only opens menus and views. Submitting a form,
 # re-checking a room, submitting a link, or placing a demo call needs the stable IDs that only a
 # card selection carries.
 PROSE_ACTIONS = ("open_orchestrator", "show_status", "show_results", "show_bookings", "start_over")
-# Prose that only opens a service's form, never submits one.
+# Prose that only opens a service overview, never submits a form.
 SERVICE_WORDS = (
     ("rooms", re.compile(r"\bstudy\s*rooms?\b|\blibrary\s+rooms?\b|\bbook\s+a\s+room\b", re.I)),
     (
@@ -224,6 +228,15 @@ def _check_custom_fields(element: dict[str, Any]) -> None:
                 raise ValueError("undocumented field(s) on list item")
             for child in _typed_elements(item.get("children")):
                 _check_custom_fields(child)
+    if kind == "choice_grid":
+        choices = element.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("choice_grid requires non-empty choices")
+        for choice in choices:
+            if not isinstance(choice, dict) or set(choice) - CHOICE_FIELDS:
+                raise ValueError("undocumented field(s) on choice_grid choice")
+    if kind == "input" and element.get("kind") == "select" and not element.get("options"):
+        raise ValueError("select input requires non-empty options")
 
 
 def _validate_custom_payload(payload: dict[str, Any]) -> None:
@@ -272,6 +285,9 @@ def _validate_predefined(kind: str, payload: dict[str, Any]) -> None:
         for name in ("id", "title", "subtitle", "secondary_text"):
             if name in item and not isinstance(item[name], str):
                 raise ValueError(f"carousel items need string {name} fields")
+    for field in payload.get("fields", []):
+        if field.get("kind") == "select" and not field.get("options"):
+            raise ValueError("select field requires non-empty options")
 
 
 def card_message(
@@ -286,11 +302,7 @@ def card_message(
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if len(encoded.encode()) > CARD_LIMIT_BYTES:
         raise ValueError("card_payload exceeds the 64KB Agentverse limit")
-    if terminal and (
-        kind in {"form", "review"}
-        or card_inputs(payload)
-        or any(sel.get("action") in INPUT_ACTIONS for _, sel in card_buttons(payload))
-    ):
+    if terminal and (kind in {"form", "review"} or card_inputs(payload) or card_buttons(payload)):
         raise ValueError("a card that expects input can never be terminal")
     metadata = {
         "card_protocol_version": "1",
@@ -364,6 +376,11 @@ def card_buttons(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
             return
         if node.get("type") == "button":
             found.append((str(node["label"]), dict(node["action"]["selection"])))
+        if node.get("type") == "list":
+            for item in node.get("items") or []:
+                action = item.get("action") if isinstance(item, dict) else None
+                if isinstance(action, dict) and isinstance(action.get("selection"), dict):
+                    found.append(("List item", dict(action["selection"])))
         for key in ("primary_cta", "submit_cta", "approve_cta", "reject_cta"):
             cta = node.get(key)
             if isinstance(cta, dict) and "selection" in cta:
@@ -440,61 +457,16 @@ def _image(name: str, alt: str = "") -> list[dict[str, Any]]:
 def _with_hero(
     card: tuple[str, dict[str, Any]], name: str, alt: str = ""
 ) -> tuple[str, dict[str, Any]]:
-    """Give any card a picture. Forms and reviews cannot carry one, so they become custom cards."""
+    """Add repository art to a detail or custom card when image hosting is enabled."""
     kind, payload = card
     if kind == "detail":
         url = art(name)
         return kind, ({"title": payload["title"], "hero_image": url, **payload} if url else payload)
-    if kind == "form":
-        return _form_to_custom(payload, name, alt)
-    if kind == "review":
-        return _review_to_custom(payload, name, alt)
     if kind == "custom":
         root = dict(payload["root"])
         root["children"] = [*_image(name, alt or str(root.get("title") or "")), *root["children"]]
         return kind, {"root": root}
     return card
-
-
-def _form_to_custom(
-    payload: dict[str, Any], hero: str, alt: str = ""
-) -> tuple[str, dict[str, Any]]:
-    """The same fields and submit selection as a form card, under a picture."""
-    children: list[dict[str, Any]] = [*_image(hero, alt or payload["title"])]
-    children.extend({"type": "input", **field} for field in payload["fields"])
-    cta = payload["submit_cta"]
-    children.append(_button(cta["label"], cta["selection"], primary=True))
-    return "custom", {"root": {"type": "section", "title": payload["title"], "children": children}}
-
-
-def _rows(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
-    """Summary rows as label-over-value text pairs, for custom cards."""
-    return [
-        {
-            "type": "group",
-            "direction": "column",
-            "children": [
-                {"type": "text", "value": row["label"], "style": "muted"},
-                {"type": "text", "value": row["value"], "style": "body"},
-            ],
-        }
-        for row in rows
-    ]
-
-
-def _review_to_custom(
-    payload: dict[str, Any], hero: str, alt: str = ""
-) -> tuple[str, dict[str, Any]]:
-    """The same rows and approve/reject selections as a review card, under a picture."""
-    approve, reject = payload["approve_cta"], payload["reject_cta"]
-    children = [
-        *_image(hero, alt or payload["title"]),
-        *_rows(payload["summary_rows"]),
-        _buttons(
-            [(approve["label"], approve["selection"]), (reject["label"], reject["selection"])]
-        ),
-    ]
-    return "custom", {"root": {"type": "section", "title": payload["title"], "children": children}}
 
 
 def _item_image(name: str) -> dict[str, str]:
@@ -588,65 +560,90 @@ SERVICES_MENU = (
 )
 
 
-def _tile(
-    image: str, title: str, body: str, badge: tuple[str, str], button: dict[str, Any]
-) -> dict[str, Any]:
-    """One picture tile in the services grid."""
-    return {
-        "type": "group",
-        "direction": "column",
-        "children": [
-            *_image(image, title),
-            {"type": "heading", "value": title, "level": 3},
-            {"type": "badge", "label": badge[0], "variant": badge[1]},
-            {"type": "text", "value": body, "style": "muted"},
-            button,
-        ],
-    }
-
-
 def welcome_card() -> tuple[str, dict[str, Any]]:
-    """The campus services menu as picture tiles, two to a row, in the spirit of Welcome Week."""
-    children: list[dict[str, Any]] = [
-        *_image("menu-banner", "ResourcePilot campus services"),
+    """The native, image-rich service picker shown at the start of every conversation."""
+    items = [
         {
-            "type": "text",
-            "value": (
-                "Campus help for your first weeks, at any US school. Pick a service; "
-                "everything runs on buttons and short forms."
-            ),
-            "style": "body",
-        },
-    ]
-    tiles = [
-        _tile(
-            f"svc-{service}",
-            title,
-            body,
-            (badge, variant),
-            _button(
-                f"Open {title.lower()}",
-                {"action": "open_service", "service": service},
-                primary=service == "rooms",
-            ),
-        )
+            "id": f"service-{service}",
+            **_item_image(f"svc-{service}"),
+            "title": title,
+            "subtitle": body,
+            "secondary_text": badge,
+            "badges": [{"label": badge, "variant": variant}],
+            "primary_cta": {
+                "label": "Explore",
+                "selection": {"action": "open_service", "service": service},
+            },
+        }
         for service, title, badge, variant, body in SERVICES_MENU
     ]
-    tiles.append(
-        _tile(
-            "svc-bookings",
-            "My bookings",
-            "Your recent room booking links, from ResourcePilot's audit trail.",
-            ("Yours only", "info"),
-            _button("My bookings", {"action": "show_bookings"}),
-        )
+    items.append(
+        {
+            "id": "service-bookings",
+            **_item_image("svc-bookings"),
+            "title": "My bookings",
+            "subtitle": "Reopen recent room links from your private ResourcePilot history.",
+            "secondary_text": "Your recent links",
+            "badges": [{"label": "Yours only", "variant": "info"}],
+            "primary_cta": {
+                "label": "Open",
+                "selection": {"action": "show_bookings"},
+            },
+        }
     )
-    for start in range(0, len(tiles), 2):
-        children.append({"type": "group", "direction": "row", "children": tiles[start : start + 2]})
-    children.append({"type": "text", "value": CRISIS_TEXT, "style": "muted"})
-    return "custom", {
-        "root": {"type": "section", "title": "ResourcePilot campus services", "children": children}
+    return "carousel", {
+        "title": "ResourcePilot campus services",
+        "subtitle": f"Live campus help at any US school. {CRISIS_TEXT}",
+        "items": items,
     }
+
+
+SERVICE_OVERVIEW_ROWS = {
+    "rooms": [
+        ("What it does", "Finds real library rooms at your school for your chosen time."),
+        ("Live check", "Re-checks the room immediately before handing you the official link."),
+        ("Your action", "You book with your own school sign-in; ResourcePilot reserves nothing."),
+        ("Price", "Always free."),
+    ],
+    "wellness": [
+        ("Crisis help", CRISIS_TEXT),
+        ("What it finds", "Quiet rooms plus this week's public wellness events and clinics."),
+        ("Privacy", "It asks for no symptoms, diagnosis, or other health information."),
+        ("Your action", "You book or RSVP on your school's official site."),
+    ],
+    "housing": [
+        ("What it does", "Matches residence halls to your criteria using official school pages."),
+        ("Costs", "Shows published hall rates and clearly labeled IPEDS typical costs."),
+        ("Your action", "You apply on your school's site; ResourcePilot never applies or pays."),
+        ("Sources", "Every link is reopened by Verification before it is shown."),
+    ],
+    "emergency": [
+        ("Demo only", DEMO_NOTICE),
+        ("Who it calls", "Only the demo contact configured by your team."),
+        ("Safety", "It never retries a call and never dials 911 or campus police."),
+        ("Next step", "Enter drill facts, then review every word before the call button appears."),
+    ],
+}
+
+
+def service_overview_card(service: str) -> tuple[str, dict[str, Any]]:
+    """A native detail page bridges the visual menu to the service's native form."""
+    selected = service if service in SERVICE_TITLES else "rooms"
+    payload = {
+        "title": SERVICE_TITLES[selected],
+        "summary_rows": [
+            {"label": label, "value": value} for label, value in SERVICE_OVERVIEW_ROWS[selected]
+        ],
+        "ctas": [
+            {
+                "label": "Set preferences",
+                "primary": True,
+                "selection": {"action": "open_form", "service": selected},
+            },
+            {"label": "All services", "selection": {"action": "start_over"}},
+        ],
+    }
+    return _with_hero(("detail", payload), f"svc-{selected}", SERVICE_TITLES[selected])
 
 
 def notice_card(
@@ -673,7 +670,7 @@ def notice_card(
 def error_card(message: str, *, service: str | None = None) -> tuple[str, dict[str, Any]]:
     actions: list[tuple[str, dict[str, Any]]] = []
     if service in SERVICE_TITLES:
-        actions.append(("Open the form", {"action": "open_service", "service": service}))
+        actions.append(("Open the form", {"action": "open_form", "service": service}))
     actions.append(("Start over", {"action": "start_over"}))
     return notice_card(
         "ResourcePilot", message, badge="Needs attention", variant="warning", buttons=actions
@@ -708,64 +705,48 @@ def _day_options(days: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 
 def rooms_form(days: list[tuple[str, str]] | None = None) -> tuple[str, dict[str, Any]]:
-    """A custom card with the same fields and submit selection a form card would carry."""
-    return _form_to_custom(
-        {
-            "title": "Find a study room at your school",
-            "fields": [
-                _email_field(),
-                _select("day", "Day", _day_options(days or upcoming_days()), required=True),
-                _select(
-                    "window",
-                    "Time of day",
-                    [(key, value[0]) for key, value in WINDOWS.items()],
-                    required=True,
-                ),
-                _select("duration", "How long", list(ROOM_DURATIONS.items()), required=True),
-                _select("group_size", "People", [(str(n), str(n)) for n in range(1, 13)]),
-            ],
-            "submit_cta": {
-                "label": "Find open rooms",
-                "selection": {"action": "submit_form", "service": "rooms"},
-            },
+    """The native ASI:One form shown after the illustrated room overview."""
+    return "form", {
+        "title": "Find a study room at your school",
+        "fields": [
+            _email_field(),
+            _select("day", "Day", _day_options(days or upcoming_days()), required=True),
+            _select(
+                "window",
+                "Time of day",
+                [(key, value[0]) for key, value in WINDOWS.items()],
+                required=True,
+            ),
+            _select("duration", "How long", list(ROOM_DURATIONS.items()), required=True),
+            _select("group_size", "People", [(str(n), str(n)) for n in range(1, 13)]),
+        ],
+        "submit_cta": {
+            "label": "Find open rooms",
+            "selection": {"action": "submit_form", "service": "rooms"},
         },
-        "svc-rooms",
-        "Study rooms",
-    )
+    }
 
 
 def wellness_form(days: list[tuple[str, str]] | None = None) -> tuple[str, dict[str, Any]]:
     """No health questions: only the school, a day, and how long a quiet room is needed."""
-    kind, payload = _form_to_custom(
-        {
-            "title": "Health & wellness at your school",
-            "fields": [
-                _email_field(),
-                _select("day", "Day", _day_options(days or upcoming_days()), required=True),
-                _select(
-                    "window",
-                    "Time of day",
-                    [(key, value[0]) for key, value in WINDOWS.items()],
-                    required=True,
-                ),
-                _select(
-                    "duration", "Quiet room for", list(WELLNESS_DURATIONS.items()), required=True
-                ),
-            ],
-            "submit_cta": {
-                "label": "Find rooms and events",
-                "selection": {"action": "submit_form", "service": "wellness"},
-            },
+    return "form", {
+        "title": "Health & wellness · crisis: 988 · emergency: 911",
+        "fields": [
+            _email_field(),
+            _select("day", "Day", _day_options(days or upcoming_days()), required=True),
+            _select(
+                "window",
+                "Time of day",
+                [(key, value[0]) for key, value in WINDOWS.items()],
+                required=True,
+            ),
+            _select("duration", "Quiet room for", list(WELLNESS_DURATIONS.items()), required=True),
+        ],
+        "submit_cta": {
+            "label": "Find rooms and events",
+            "selection": {"action": "submit_form", "service": "wellness"},
         },
-        "svc-wellness",
-        "Health & wellness",
-    )
-    # The crisis line comes before everything else, the picture included.
-    payload["root"]["children"][:0] = [
-        {"type": "badge", "label": "Crisis help · 24/7", "variant": "warning"},
-        {"type": "text", "value": CRISIS_TEXT, "style": "body"},
-    ]
-    return kind, payload
+    }
 
 
 def _demo_notice() -> list[dict[str, Any]]:
@@ -778,38 +759,37 @@ def _demo_notice() -> list[dict[str, Any]]:
 
 def emergency_form() -> tuple[str, dict[str, Any]]:
     """The drill's facts. No phone number field: only the configured demo contact is called."""
-    kind, payload = _form_to_custom(
-        {
-            "title": "Emergency demo drill",
-            "fields": [
-                _select(
-                    "kind",
-                    "What is happening",
-                    [
-                        ("medical", "Medical"),
-                        ("fire", "Fire or smoke"),
-                        ("danger", "Someone in danger"),
-                        ("other", "Other"),
-                    ],
-                    required=True,
-                ),
-                {"name": "location", "kind": "text", "label": "Where on campus", "required": True},
-                _select("people", "People who need help", [(str(n), str(n)) for n in range(1, 11)]),
-                {"name": "details", "kind": "text", "label": "Anything else (optional)"},
-                _select("caller_safe", "Are you safe right now?", [("yes", "Yes"), ("no", "No")]),
-                {"name": "school", "kind": "text", "label": "School (optional)"},
-            ],
-            "submit_cta": {
-                "label": "Review the demo call",
-                "selection": {"action": "submit_form", "service": "emergency"},
+    return "form", {
+        "title": "Emergency demo · not 911 · real emergency: call 911",
+        "fields": [
+            _select(
+                "kind",
+                "What is happening",
+                [
+                    ("medical", "Medical"),
+                    ("fire", "Fire or smoke"),
+                    ("danger", "Someone in danger"),
+                    ("other", "Other"),
+                ],
+                required=True,
+            ),
+            {"name": "location", "kind": "text", "label": "Where on campus", "required": True},
+            _select("people", "People who need help", [(str(n), str(n)) for n in range(1, 11)]),
+            {"name": "details", "kind": "text", "label": "Anything else (optional)"},
+            _select("caller_safe", "Are you safe right now?", [("yes", "Yes"), ("no", "No")]),
+            {"name": "school", "kind": "text", "label": "School (optional)"},
+            {
+                "name": "demo_only",
+                "kind": "checkbox",
+                "label": "I understand: demo only",
+                "required": True,
             },
+        ],
+        "submit_cta": {
+            "label": "Review the demo call",
+            "selection": {"action": "submit_form", "service": "emergency"},
         },
-        "svc-emergency",
-        "Emergency demo drill",
-    )
-    # The drill disclaimer comes before everything else, the picture included.
-    payload["root"]["children"][:0] = _demo_notice()
-    return kind, payload
+    }
 
 
 def housing_form() -> tuple[str, dict[str, Any]]:
@@ -818,28 +798,24 @@ def housing_form() -> tuple[str, dict[str, Any]]:
         {"name": f"need_{key}", "kind": "checkbox", "label": label}
         for key, label in HOUSING_FEATURES.items()
     ]
-    return _form_to_custom(
-        {
-            "title": "On-campus housing at your school",
-            "fields": [
-                _email_field(),
-                _select("who", "I am a", list(HOUSING_WHO.items()), required=True),
-                _select("style", "Housing style", list(HOUSING_STYLES.items())),
-                *must_haves,
-                {
-                    "name": "max_budget",
-                    "kind": "number",
-                    "label": "Max yearly budget, USD",
-                },
-            ],
-            "submit_cta": {
-                "label": "Find housing",
-                "selection": {"action": "submit_form", "service": "housing"},
+    return "form", {
+        "title": "On-campus housing at your school",
+        "fields": [
+            _email_field(),
+            _select("who", "I am a", list(HOUSING_WHO.items()), required=True),
+            _select("style", "Housing style", list(HOUSING_STYLES.items())),
+            *must_haves,
+            {
+                "name": "max_budget",
+                "kind": "number",
+                "label": "Max yearly budget, USD",
             },
+        ],
+        "submit_cta": {
+            "label": "Find housing",
+            "selection": {"action": "submit_form", "service": "housing"},
         },
-        "svc-housing",
-        "Campus housing",
-    )
+    }
 
 
 def service_form(service: str) -> tuple[str, dict[str, Any]]:
@@ -918,20 +894,73 @@ STAGE_LABELS = {
 def progress_card(
     workflow_id: str, stage: str, chain: tuple[str, ...] = ()
 ) -> tuple[str, dict[str, Any]]:
-    children: list[dict[str, Any]] = [
-        {"type": "badge", "label": STAGE_LABELS.get(stage, stage.title()), "variant": "info"}
-    ]
+    current_label = STAGE_LABELS.get(stage, stage.replace("_", " ").title())
+    children: list[dict[str, Any]] = []
     if stage in chain:
-        done = chain[: chain.index(stage)]
-        steps = [f"✓ {STAGE_LABELS.get(role, role.title())}" for role in done]
-        steps.append(f"• {STAGE_LABELS.get(stage, stage.title())}")
-        children.append({"type": "text", "value": "\n".join(steps), "style": "body"})
+        current = chain.index(stage)
+        children.append(
+            {
+                "type": "badge",
+                "label": f"Step {current + 1} of {len(chain)}",
+                "variant": "info",
+            }
+        )
+        children.append(
+            {
+                "type": "list",
+                "items": [
+                    {
+                        "children": [
+                            {
+                                "type": "badge",
+                                "label": "Done"
+                                if index < current
+                                else ("Now" if index == current else "Next"),
+                                "variant": "success" if index < current else "info",
+                            },
+                            {
+                                "type": "text",
+                                "value": STAGE_LABELS.get(role, role.replace("_", " ").title()),
+                                "style": "body" if index == current else "muted",
+                            },
+                        ]
+                    }
+                    for index, role in enumerate(chain)
+                ],
+            }
+        )
+    else:
+        children.extend(
+            [
+                {"type": "badge", "label": "Live update", "variant": "info"},
+                {
+                    "type": "list",
+                    "items": [
+                        {
+                            "children": [
+                                {"type": "badge", "label": "Now", "variant": "info"},
+                                {"type": "text", "value": current_label, "style": "body"},
+                            ]
+                        }
+                    ],
+                },
+            ]
+        )
     children.append({"type": "text", "value": f"Workflow {workflow_id[:8]}", "style": "muted"})
     children.append(
         _button("Refresh status", {"action": "show_status", "workflow_id": workflow_id})
     )
     return _with_hero(
-        ("custom", {"root": {"type": "section", "title": "Agents at work", "children": children}}),
+        (
+            "custom",
+            {
+                "root": {
+                    "type": "section",
+                    "title": f"Agents at work · {current_label}",
+                    "children": children,
+                }
+            },
+        ),
         STAGE_ART.get(stage, "hero-info"),
     )
 
@@ -972,8 +1001,12 @@ def rooms_carousel(
             }
         )
     return "carousel", {
-        "title": f"Open study rooms at {school}",
-        "subtitle": "Re-checked live before you get the booking link. Always free.",
+        "title": f"{'Wellness rooms' if wellness else 'Open study rooms'} at {school}",
+        "subtitle": (
+            "Quiet spaces, re-checked live before the official booking link. Always free."
+            if wellness
+            else "Re-checked live before you get the booking link. Always free."
+        ),
         "items": items,
     }
 
@@ -1040,7 +1073,7 @@ def room_detail(
 def room_link_receipt(
     option: dict[str, Any], *, service: str = "rooms"
 ) -> tuple[str, dict[str, Any]]:
-    """The booking link after a successful re-check. Safe as a terminal card: only CTAs remain."""
+    """The booking link after a successful re-check, with navigation CTAs."""
     line = option["lines"][0]
     rows = [{"label": "Room", "value": str(line["name"])}]
     if line.get("slot_label"):
@@ -1072,10 +1105,11 @@ def room_link_receipt(
                     "label": "Find another room",
                     "primary": True,
                     "selection": {
-                        "action": "open_service",
+                        "action": "open_form",
                         "service": "wellness" if service == "wellness" else "rooms",
                     },
                 },
+                {"label": "My bookings", "selection": {"action": "show_bookings"}},
                 {"label": "Menu", "selection": {"action": "start_over"}},
             ],
         },
@@ -1393,7 +1427,7 @@ def no_housing_match_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, 
         variant="warning",
         buttons=[
             ("Show all halls", {"action": "show_all_housing", "workflow_id": workflow_id}),
-            ("Change criteria", {"action": "open_service", "service": "housing"}),
+            ("Change criteria", {"action": "open_form", "service": "housing"}),
             ("Housing facts", {"action": "show_housing_facts", "workflow_id": workflow_id}),
         ],
         image="svc-housing",
@@ -1401,115 +1435,77 @@ def no_housing_match_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, 
 
 
 def wellness_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Crisis line first, then open wellness rooms, then the week's events. Never empty."""
+    """A visual hub that routes to native room results or an interactive events list."""
     school = dict(data.get("school") or {})
     name = str(school.get("school_name") or "your school")
     wellness = dict(data.get("wellness") or {})
     options = list(data.get("options") or [])
+    events = list(wellness.get("events") or [])
     children: list[dict[str, Any]] = [
         {"type": "badge", "label": "Crisis help · 24/7", "variant": "warning"},
         {"type": "text", "value": CRISIS_TEXT, "style": "body"},
         *_image("wellness-hero", f"Health & wellness at {name}"),
         {"type": "divider"},
-        {"type": "heading", "value": "Wellness rooms open", "level": 3},
-    ]
-    if options:
-        for option in options:
-            line = option["lines"][0]
-            detail = " · ".join(
-                part
-                for part in (
-                    str(line.get("slot_label") or ""),
-                    str(line.get("location_label") or ""),
-                )
-                # LibCal often names a one-room group after the room itself.
-                if part and part != str(line["name"])
-            )
-            children.append(
+        {
+            "type": "group",
+            "direction": "row",
+            "children": [
                 {
-                    "type": "group",
-                    "direction": "column",
-                    "children": [
-                        *_image(room_art(0, wellness=True), str(line["name"])),
-                        {
-                            "type": "text",
-                            "value": f"{line['name']} · {detail}" if detail else str(line["name"]),
-                            "style": "body",
-                        },
-                        _button(
-                            "View room",
-                            {
-                                "action": "view_room",
-                                "workflow_id": workflow_id,
-                                "option_id": str(option["option_id"]),
-                            },
-                        ),
-                    ],
-                }
-            )
-        children.append(
-            {
-                "type": "text",
-                "value": "Free. Re-checked live before you get the booking link.",
-                "style": "muted",
-            }
-        )
-    else:
-        rooms = dict(data.get("rooms") or {})
+                    "type": "badge",
+                    "label": f"{len(options)} room{'s' if len(options) != 1 else ''}",
+                    "variant": "success" if options else "warning",
+                },
+                {
+                    "type": "badge",
+                    "label": f"{len(events)} event{'s' if len(events) != 1 else ''}",
+                    "variant": "success" if events else "warning",
+                },
+            ],
+        },
+    ]
+    rooms = dict(data.get("rooms") or {})
+    if not options:
         if data.get("room_note"):
-            note = str(data["room_note"])
+            room_note = str(data["room_note"])
         elif rooms.get("status") != "found":
-            note = f"No public room-booking system found for {name}"
+            room_note = f"No public room-booking system found for {name}"
         else:
-            note = f"No wellness room at {name} is open in that window"
-        children.append({"type": "text", "value": note, "style": "muted"})
-    children.extend(
-        [{"type": "divider"}, {"type": "heading", "value": "Wellness events this week", "level": 3}]
-    )
-    events = list(wellness.get("events") or [])
+            room_note = f"No wellness room at {name} is open in that window"
+        children.append({"type": "text", "value": room_note, "style": "muted"})
+    if not events:
+        if wellness.get("status") == "found":
+            event_note = "No wellness events listed this week"
+        elif wellness.get("status") == "unavailable":
+            event_note = "The events calendar did not answer"
+        else:
+            event_note = f"No public events calendar found for {name}"
+        children.append({"type": "text", "value": event_note, "style": "muted"})
+    choices: list[dict[str, Any]] = []
+    if options:
+        room_choice: dict[str, Any] = {"value": "rooms", "label": "Open wellness rooms"}
+        if art("room-wellness"):
+            room_choice["image"] = art("room-wellness")
+        choices.append(room_choice)
     if events:
-        children.append(
-            {
-                "type": "list",
-                "items": [
-                    {
-                        "children": [
-                            *_event_image(event),
-                            {"type": "text", "value": str(event["title"]), "style": "body"},
-                            {
-                                "type": "text",
-                                "value": " · ".join(
-                                    part
-                                    for part in (
-                                        str(event["when"]),
-                                        str(event.get("location") or ""),
-                                    )
-                                    if part
-                                ),
-                                "style": "muted",
-                            },
-                            {"type": "text", "value": f"RSVP: {event['url']}", "style": "muted"},
-                        ]
-                    }
-                    for event in events
-                ],
-            }
-        )
-    elif wellness.get("status") == "found":
-        children.append(
-            {"type": "text", "value": "No wellness events listed this week", "style": "muted"}
-        )
-    elif wellness.get("status") == "unavailable":
-        children.append(
-            {"type": "text", "value": "The events calendar did not answer", "style": "muted"}
-        )
-    else:
-        children.append(
-            {
-                "type": "text",
-                "value": f"No public events calendar found for {name}",
-                "style": "muted",
-            }
+        event_choice: dict[str, Any] = {"value": "events", "label": "Events this week"}
+        if art("event-default"):
+            event_choice["image"] = art("event-default")
+        choices.append(event_choice)
+    if choices:
+        children.extend(
+            [
+                {
+                    "type": "choice_grid",
+                    "name": "wellness_view",
+                    "choices": choices,
+                    "multi": False,
+                },
+                _button(
+                    "Open selection",
+                    {"action": "show_wellness_view", "workflow_id": workflow_id},
+                    primary=True,
+                ),
+            ]
         )
     sources = []
     if wellness.get("feed_host"):
@@ -1534,28 +1530,133 @@ def wellness_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, dict[str
     }
 
 
+def wellness_events_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """The week's events as tappable, image-rich list rows."""
+    name = str(data.get("school", {}).get("school_name") or "your school")
+    wellness = dict(data.get("wellness") or {})
+    events = list(wellness.get("events") or [])
+    children: list[dict[str, Any]] = [
+        {"type": "badge", "label": "Crisis help · 24/7", "variant": "warning"},
+        {"type": "text", "value": CRISIS_TEXT, "style": "body"},
+    ]
+    if events:
+        children.append(
+            {
+                "type": "list",
+                "items": [
+                    {
+                        "children": [
+                            *_event_image(event),
+                            {"type": "text", "value": str(event["title"]), "style": "body"},
+                            {
+                                "type": "text",
+                                "value": " · ".join(
+                                    part
+                                    for part in (
+                                        str(event["when"]),
+                                        str(event.get("location") or ""),
+                                    )
+                                    if part
+                                ),
+                                "style": "muted",
+                            },
+                        ],
+                        "action": {
+                            "selection": {
+                                "action": "view_wellness_event",
+                                "workflow_id": workflow_id,
+                                "event_index": str(index),
+                            }
+                        },
+                    }
+                    for index, event in enumerate(events)
+                ],
+            }
+        )
+    else:
+        children.append(
+            {
+                "type": "text",
+                "value": "No verified wellness events are available right now.",
+                "style": "muted",
+            }
+        )
+    children.extend(
+        [
+            {"type": "divider"},
+            {
+                "type": "text",
+                "value": (
+                    f"Tap an event for its verified details and official RSVP link. "
+                    f"Source: {wellness.get('feed_host') or 'the school events calendar'}."
+                ),
+                "style": "muted",
+            },
+            _buttons(
+                [
+                    ("Wellness hub", {"action": "show_status", "workflow_id": workflow_id}),
+                    ("Start over", {"action": "start_over"}),
+                ]
+            ),
+        ]
+    )
+    return "custom", {
+        "root": {"type": "section", "title": f"Wellness events at {name}", "children": children}
+    }
+
+
+def wellness_event_detail(workflow_id: str, event: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """One verified event with its official RSVP URL and a route back to the events list."""
+    rows = [
+        {"label": "When", "value": str(event.get("when") or "See the official event page")},
+        {"label": "Where", "value": str(event.get("location") or "See the official event page")},
+        {"label": "Official RSVP", "value": str(event.get("url") or "")},
+        {
+            "label": "Privacy",
+            "value": "ResourcePilot does not register you or ask for health information.",
+        },
+    ]
+    payload: dict[str, Any] = {
+        "title": str(event.get("title") or "Wellness event"),
+        "summary_rows": rows,
+        "ctas": [
+            {
+                "label": "Back to events",
+                "primary": True,
+                "selection": {
+                    "action": "show_wellness_view",
+                    "workflow_id": workflow_id,
+                    "wellness_view": "events",
+                },
+            },
+            {
+                "label": "Wellness hub",
+                "selection": {"action": "show_status", "workflow_id": workflow_id},
+            },
+        ],
+    }
+    photo = str(event.get("photo") or "")
+    if photo.startswith("https://") and len(photo) <= MAX_PHOTO_URL and image_base():
+        payload = {"title": payload["title"], "hero_image": photo, **payload}
+        return "detail", payload
+    return _with_hero(("detail", payload), "event-default", str(payload["title"]))
+
+
 def emergency_review_card(workflow_id: str, preview: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """What will be said and to whom, before anything is dialed. Only "Call now" places it."""
     rows = [{"label": str(label), "value": str(value)} for label, value in preview.get("rows", [])]
     rows.append({"label": "Opening line", "value": str(preview.get("opening") or "")})
     rows.append({"label": "Not 911", "value": DEMO_NOTICE})
-    kind, payload = _review_to_custom(
-        {
-            "title": "Review the demo call",
-            "summary_rows": rows,
-            "approve_cta": {
-                "label": "Call now",
-                "primary": True,
-                "selection": {"action": "place_call", "workflow_id": workflow_id},
-            },
-            "reject_cta": {"label": "Cancel", "selection": {"action": "start_over"}},
+    return "review", {
+        "title": "Review the demo call",
+        "summary_rows": rows,
+        "approve_cta": {
+            "label": "Call now",
+            "primary": True,
+            "selection": {"action": "place_call", "workflow_id": workflow_id},
         },
-        "hero-call",
-        "Demo drill phone call",
-    )
-    # The drill disclaimer comes before everything else, the picture included.
-    payload["root"]["children"][:0] = _demo_notice()
-    return kind, payload
+        "reject_cta": {"label": "Cancel", "selection": {"action": "start_over"}},
+    }
 
 
 def emergency_call_card(
@@ -1623,36 +1724,59 @@ def emergency_call_card(
     return "custom", {"root": {"type": "section", "title": "Demo call", "children": children}}
 
 
-def _booking_row(booking: dict[str, Any]) -> dict[str, str]:
+def _booking_item(booking: dict[str, Any], index: int) -> dict[str, Any]:
     data = booking["data"]
     brief = dict(data.get("brief") or {})
     line = booking["option"]["lines"][0]
     school = (data.get("school") or {}).get("school_name") or line.get("school_name")
     when = line.get("slot_label") or (describe_window(brief) if brief.get("window_start") else "")
-    name = f"{line['name']} · {school}" if school else str(line["name"])
-    link = line.get("handoff_url")
-    kind = "Wellness room" if brief.get("service") == "wellness" else "Study room"
+    service = str(brief.get("service") or booking.get("service") or "rooms")
+    kind = "Wellness room" if service == "wellness" else "Study room"
     return {
-        "label": str(when or kind),
-        "value": f"{name}: {link}" if link else name,
+        "id": str(booking["workflow_id"]),
+        **_item_image(room_art(index, wellness=service == "wellness")),
+        "title": str(line["name"]),
+        "subtitle": " · ".join(part for part in (str(school or ""), str(when or "")) if part),
+        "secondary_text": f"{kind} · Free",
+        "badges": [{"label": "Re-checked", "variant": "success"}],
+        "primary_cta": {
+            "label": "Open booking",
+            "selection": {
+                "action": "show_booking",
+                "workflow_id": str(booking["workflow_id"]),
+            },
+        },
     }
 
 
 def bookings_card(bookings: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
     """Recent booked workflow states: each keeps its chosen option and its brief and school."""
-    rows = [
-        _booking_row(booking)
+    valid = [
+        booking
         for booking in bookings
         if (booking.get("option") or {}).get("lines") and (booking.get("data") or {}).get("brief")
-    ][:10] or [{"label": "Bookings", "value": "No bookings yet"}]
-    card = (
-        "detail",
-        {
+    ][:10]
+    if valid:
+        return "carousel", {
             "title": "Your recent booking links",
-            "summary_rows": rows,
-            "ctas": [
-                {"label": "New request", "primary": True, "selection": {"action": "start_over"}}
-            ],
-        },
+            "subtitle": "Open a re-checked room link or start a new campus search.",
+            "items": [_booking_item(booking, index) for index, booking in enumerate(valid)],
+        }
+    return _with_hero(
+        (
+            "detail",
+            {
+                "title": "Your recent booking links",
+                "summary_rows": [{"label": "Bookings", "value": "No bookings yet"}],
+                "ctas": [
+                    {
+                        "label": "Find a room",
+                        "primary": True,
+                        "selection": {"action": "open_service", "service": "rooms"},
+                    },
+                    {"label": "All services", "selection": {"action": "start_over"}},
+                ],
+            },
+        ),
+        "svc-bookings",
     )
-    return _with_hero(card, "svc-bookings")

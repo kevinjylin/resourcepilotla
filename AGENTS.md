@@ -27,8 +27,9 @@ official pages in [docs/official-links.md](docs/official-links.md) for anything 
   - `rooms`: Intake → Campus Researcher → Campus Rooms → Verification → Planner, then a rooms
     carousel. "Re-check this room" sends Campus Rooms a `phase="recheck"` task. Still open: the
     booking-link card. Taken: the Planner again with that room in `exclude_items`.
-  - `wellness`: the `rooms` chain for wellness rooms, then the wellness card (988 first, open
-    wellness rooms, the week's events). The Researcher never pauses for a link here; a school
+  - `wellness`: the `rooms` chain for wellness rooms, then the wellness hub (988 first, live
+    counts, and a choice grid for the rooms carousel or tappable events list). The Researcher
+    never pauses for a link here; a school
     with no room system skips Campus Rooms and the Planner (Intake → Campus Researcher →
     Verification). Verification re-fetches the events feed itself. Picking a room uses the same
     re-check and booking link as study rooms.
@@ -39,9 +40,10 @@ official pages in [docs/official-links.md](docs/official-links.md) for anything 
   - `emergency`: Emergency Dispatcher (`phase="preview"`) → review card (`awaiting_call`).
     **Call now** sends the Dispatcher a `phase="call"` task, then the call card (`called`).
     **Check the call** sends a `phase="status"` task and shows the transcript.
-- The Orchestrator offers services from a menu: Study rooms, Health & wellness, Campus housing,
-  Emergency (demo), and My bookings.
-  Requests start only from a form submission; free text gets the menu card, never a workflow.
+- The Orchestrator offers services from an image carousel: Study rooms, Health & wellness, Campus
+  housing, Emergency (demo), and My bookings. A service opens an illustrated detail overview and
+  then a native form. Requests start only from a form submission; free text gets the menu card,
+  never a workflow.
   Every Orchestrator reply is a card.
 - Never add padding roles, or simulate several roles inside one chatbot.
 - The Orchestrator delegates with `ctx.send`. Keep workflow, request, requester, and session
@@ -57,15 +59,19 @@ official pages in [docs/official-links.md](docs/official-links.md) for anything 
   Keep `card_protocol_version="1"`, `requires_card_interaction="true"`, a supported
   `card_kind`, and a JSON `card_payload` of 64KB or less. Custom cards need a typed `root`
   and may be at most eight levels deep.
-- Give every card a picture from `assets/cards` through `cards.art()`, and every specialist's
-  status card its role art through `cards.agent_art()`. Keep image URLs https, and keep every
-  card valid with `CARD_IMAGE_BASE` empty or non-https. Forms and the emergency review are custom
-  cards because the predefined kinds cannot show images; keep their field names, submit
-  selection, and approve and reject selections stable. Redraw art with
-  `scripts/make_card_art.py` and keep `assets/PROMPTS.md` in step.
+- Give every visual/navigation card a picture from `assets/cards` through `cards.art()`, and every
+  specialist's status card its role art through `cards.agent_art()`. Keep image URLs https, and
+  keep every card valid with `CARD_IMAGE_BASE` empty or non-https. Native `form` and `review`
+  cards intentionally follow illustrated detail overviews because those predefined schemas do
+  not support images; keep their field names, submit selection, and approve/reject selections
+  stable. Redraw art with `scripts/make_card_art.py` and keep `assets/PROMPTS.md` in step.
+- Preserve the interactive range: carousel service and booking pickers, detail overviews, native
+  forms and reviews, custom progress lists, wellness `choice_grid`, tappable event-list actions,
+  and carousel/detail results. Do not claim ASCII, CSS, GIF, or other animation support; progress
+  is a sequence of cards sent at real specialist handoffs.
 - Put stable action, workflow, and option IDs in selections. Parse direct JSON first, then the
   bounded prose allowlist. Never infer a re-check, a booking, or any other consequential action
-  from ambiguous prose, and never mark a card terminal when it expects input.
+  from ambiguous prose, and never mark a card terminal when it has any input or CTA.
 
 ## Preserve live-data safety
 

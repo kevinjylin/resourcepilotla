@@ -1,8 +1,9 @@
 # ResourcePilot LA
 
 Campus help for a student's first weeks, at any US school, run by a team of eight uAgents in one
-ASI:One conversation. It works like Fetch's Welcome Week agents: a services menu of buttons and
-short forms, with a card for every reply.
+ASI:One conversation. The interface is entirely native ASI:One cards: an image carousel, illustrated
+service overviews, forms, a live multi-agent relay, choice grids, tappable lists, result carousels,
+detail pages, and safety reviews.
 
 | Service | What you get | Source |
 | --- | --- | --- |
@@ -43,20 +44,22 @@ This repository uses public Fetch.ai packages and documentation only.
 
 ![ResourcePilot campus services](assets/cards/menu-banner.jpg)
 
-Every reply in ASI:One is a picture card:
+Every reply in ASI:One is an interactive card:
 
-- The menu is a banner and a grid of picture tiles, one per service, like the Welcome Week hubs.
-- Each form has a picture of its service. The wellness form keeps the 988 crisis line first, and
-  the emergency form keeps its demo-drill notice first.
-- Progress cards show the agent at work, with each specialist's own art.
+- The menu is a native image carousel. Each service opens an illustrated detail page before its
+  native ASI:One form, so the experience keeps both strong visuals and polished form controls.
+- Wellness opens as a dashboard with static 988/911 guidance, live result counts, and a
+  `choice_grid` for rooms or events. Rooms use a carousel; event list rows open verified detail
+  pages with the official RSVP link.
+- Progress cards act as a live relay: each specialist handoff sends a new card with role art and a
+  structured Done/Now/Next list. This is honest sequential motion, not an unsupported animation.
 - The rooms carousel shows a picture for each open study or wellness room, and the room's detail,
-  booking-link, and receipt cards have their own art.
+  booking-link, and receipt cards have their own art and navigation.
 - The housing carousel shows each hall with the school's own photo of it, and a residence-hall
   picture when the school has none.
-- The wellness card shows its open rooms and each event with the event's own photo from the
-  school's calendar, or a default picture.
-- The emergency review and call cards show a demo-drill phone call, never police or ambulance
-  imagery, and still say they do not contact 911 or campus police.
+- My bookings is a carousel that reopens any saved booking-link card.
+- Emergency uses an illustrated safety overview, a native form and native review gate, then a
+  transcript card. Every step says it is a demo that does not contact 911 or campus police.
 
 The art is drawn in code by `scripts/make_card_art.py` and served from this public repository; the
 student's browser loads it, and ResourcePilot never fetches an image itself.
@@ -128,9 +131,10 @@ Study rooms   Intake ─▶ Campus Researcher ─▶ Campus Rooms (live LibCal) 
 
 Wellness      Intake ─▶ Campus Researcher (room system + events feed) ─▶ Campus Rooms
               (wellness rooms) ─▶ Verification (re-fetches the feed) ─▶ Planner
-              ─▶ wellness card: 988 first, open rooms, this week's events
-              "View room" ─▶ the same live re-check and booking link as study rooms
-              No room system: Intake ─▶ Campus Researcher ─▶ Verification ─▶ wellness card
+              ─▶ wellness hub: 988 first, room/event counts, choice grid
+              Rooms ─▶ carousel ─▶ the same live re-check and booking link as study rooms
+              Events ─▶ tappable list ─▶ verified event detail and official RSVP link
+              No room system: Intake ─▶ Campus Researcher ─▶ Verification ─▶ wellness hub
 
 Housing       Intake ─▶ Campus Researcher (reads each hall's page) ─▶ Verification (re-opens
               each hall and link) ─▶ Planner (matches your criteria) ─▶ halls carousel ─▶ hall
@@ -140,7 +144,7 @@ Emergency     Emergency Dispatcher (preview: checks the form) ─▶ review card
               "Check the call" ─▶ Emergency Dispatcher reads the call ─▶ summary and transcript
               "Cancel" ─▶ no call
 
-My bookings   Orchestrator ─▶ your recent re-checked rooms
+My bookings   Orchestrator ─▶ recent rooms carousel ─▶ saved booking-link detail
 ```
 
 Every arrow between agents is a `TaskRequest` sent with `ctx.send` and answered by a `TaskResult`.

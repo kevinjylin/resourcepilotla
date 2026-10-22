@@ -58,23 +58,33 @@ def recheck_cta(detail: dict) -> dict:
     return next(c for c in detail["ctas"] if c["selection"]["action"] == "recheck_room")
 
 
+async def open_service_form(network, service: str) -> dict:
+    await network.send_user(chat({"action": "open_service", "service": service}))
+    _, overview, _ = last_card(network, "detail")
+    open_form = next(
+        c["selection"] for c in overview["ctas"] if c["selection"]["action"] == "open_form"
+    )
+    await network.send_user(chat(open_form))
+    _, form, _ = last_card(network, "form")
+    return form
+
+
 async def test_every_reply_is_a_card_and_free_text_gets_the_menu(network) -> None:
     await network.send_user(chat("hi"))
     kind, payload, _ = last_card(network)
-    assert (kind, payload["root"]["title"]) == ("custom", "ResourcePilot campus services")
+    assert (kind, payload["title"]) == ("carousel", "ResourcePilot campus services")
     menu = json.dumps(payload).lower()
     assert "bundle" not in menu and "payment" not in menu and "stripe" not in menu
     await network.send_user(chat("I need a DSLR Friday 3-6pm under $35"))
     _, menu_again, narration = last_card(network)
-    assert menu_again["root"]["title"] == "ResourcePilot campus services"
+    assert menu_again["title"] == "ResourcePilot campus services"
     assert "buttons and forms" in narration
     assert network.store.workflows == {}  # a sentence never starts a request
     for service in ("rooms", "wellness", "housing"):
-        await network.send_user(chat({"action": "open_service", "service": service}))
-        _, form, _ = last_with(network, "submit_form")
+        form = await open_service_form(network, service)
         assert click(form, "submit_form") == {"action": "submit_form", "service": service}
     await network.send_user(chat({"action": "open_service", "service": "bundle"}))
-    assert last_card(network)[1]["root"]["title"] == "ResourcePilot campus services"
+    assert last_card(network)[1]["title"] == "ResourcePilot campus services"
     assert len(network.cards()) == len(network.texts())  # no plain-text reply anywhere
 
 
@@ -112,8 +122,10 @@ async def test_my_bookings_lists_the_booked_room(network) -> None:
     _, detail = await open_first_room(network)
     await network.send_user(chat(recheck_cta(detail)["selection"]))
     await network.send_user(chat({"action": "show_bookings"}))
-    _, bookings, _ = last_card(network, "detail")
+    _, bookings, _ = last_card(network, "carousel")
     assert "WALC 3138" in json.dumps(bookings)
+    await network.send_user(chat(bookings["items"][0]["primary_cta"]["selection"]))
+    assert last_card(network, "detail")[1]["title"] == "Your booking link"
 
 
 async def test_room_taken_during_recheck_goes_back_to_the_other_rooms(network) -> None:
@@ -179,18 +191,15 @@ def wellness_form(domain: str = "purdue.edu") -> dict:
     return {**rooms_form(domain, duration="30"), "service": "wellness", "group_size": "1"}
 
 
-def wellness_view_buttons(card: dict) -> list[dict]:
-    found = []
-
-    def walk(node):
-        if isinstance(node, dict):
-            if node.get("type") == "button" and node["label"] == "View room":
-                found.append(node["action"]["selection"])
-            for child in node.get("children", []):
-                walk(child)
-
-    walk(card["root"])
-    return found
+def wellness_choice(card: dict, view: str) -> dict:
+    grid = next(child for child in card["root"]["children"] if child.get("type") == "choice_grid")
+    assert view in {choice["value"] for choice in grid["choices"]}
+    button = next(
+        child
+        for child in card["root"]["children"]
+        if child.get("type") == "button" and child["label"] == "Open selection"
+    )
+    return {**button["action"]["selection"], "wellness_view": view}
 
 
 async def test_wellness_flow_shows_crisis_rooms_and_events_then_a_link(network) -> None:
@@ -199,8 +208,7 @@ async def test_wellness_flow_shows_crisis_rooms_and_events_then_a_link(network) 
     assert card["root"]["title"] == "Health & wellness at Purdue University-Main Campus"
     assert "988" in narration
     encoded = json.dumps(card, ensure_ascii=False)
-    assert encoded.index("988") < encoded.index("Wellness rooms open")
-    assert "Free Flu Shot Clinic" in encoded and "Football" not in encoded
+    assert encoded.index("988") < encoded.index("Open wellness rooms")
     assert "evil.example.com" not in encoded
     assert completed_roles(network) == [
         "intake",
@@ -209,8 +217,26 @@ async def test_wellness_flow_shows_crisis_rooms_and_events_then_a_link(network) 
         "verification",
         "planner",
     ]
-    (view,) = wellness_view_buttons(card)
-    await network.send_user(chat(view))
+    await network.send_user(chat(wellness_choice(card, "events")))
+    _, events, _ = last_card(network, "custom")
+    events_text = json.dumps(events)
+    assert "Free Flu Shot Clinic" in events_text and "Football" not in events_text
+    first_event = next(
+        item["action"]["selection"]
+        for child in events["root"]["children"]
+        if child.get("type") == "list"
+        for item in child["items"]
+    )
+    await network.send_user(chat(first_event))
+    _, event_detail, _ = last_card(network, "detail")
+    assert event_detail["title"] == "Free Flu Shot Clinic"
+    await network.send_user(
+        chat({"action": "show_status", "workflow_id": next(iter(network.store.workflows))})
+    )
+    _, card, _ = last_card(network, "custom")
+    await network.send_user(chat(wellness_choice(card, "rooms")))
+    _, rooms, _ = last_card(network, "carousel")
+    await network.send_user(chat(rooms["items"][0]["primary_cta"]["selection"]))
     _, detail, _ = last_card(network, "detail")
     assert detail["title"] == "Meditation Room"
     assert "988" in json.dumps(detail)
@@ -226,8 +252,10 @@ async def test_wellness_flow_shows_crisis_rooms_and_events_then_a_link(network) 
 
 async def test_wellness_room_taken_during_recheck_returns_to_the_wellness_card(network) -> None:
     await network.send_user(chat(wellness_form()))
-    (view,) = wellness_view_buttons(last_card(network, "custom")[1])
-    await network.send_user(chat(view))
+    hub = last_card(network, "custom")[1]
+    await network.send_user(chat(wellness_choice(hub, "rooms")))
+    _, rooms, _ = last_card(network, "carousel")
+    await network.send_user(chat(rooms["items"][0]["primary_cta"]["selection"]))
     _, detail, _ = last_card(network, "detail")
     network.use_http(booked={"104@12:00"})
     await network.send_user(chat(recheck_cta(detail)["selection"]))
@@ -255,7 +283,7 @@ async def test_wellness_explains_a_libcal_without_wellness_rooms(network) -> Non
     await network.send_user(chat(wellness_form("ucla.edu")))
     _, card, _ = last_card(network, "custom")
     assert "No wellness rooms are listed" in json.dumps(card)
-    assert wellness_view_buttons(card) == []
+    assert not [child for child in card["root"]["children"] if child.get("type") == "choice_grid"]
     assert next(iter(network.store.workflows.values()))["status"] == "awaiting_selection"
 
 
@@ -441,10 +469,10 @@ async def test_emergency_drill_reviews_then_places_exactly_one_call(network, mon
     from test_emergency import API_KEY, DEMO_NUMBER
 
     fake = emergency_setup(network, monkeypatch)
-    await network.send_user(chat({"action": "open_service", "service": "emergency"}))
-    _, form, _ = last_with(network, "submit_form")
+    form = await open_service_form(network, "emergency")
     assert click(form, "submit_form") == {"action": "submit_form", "service": "emergency"}
-    assert form["root"]["children"][1]["value"] == cards.DEMO_NOTICE  # before the picture
+    assert "not 911" in form["title"]
+    assert any(field["name"] == "demo_only" for field in form["fields"])
     await network.send_user(chat(EMERGENCY_FORM))
     _, review, narration = last_with(network, "place_call")
     assert completed_roles(network) == ["emergency"]

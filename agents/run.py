@@ -275,8 +275,8 @@ async def _orchestrator_chat(
 ) -> None:
     action = str(selection.get("action", "")).strip()
     service = str(selection.get("service", "")).strip()
-    stale = action in {"open_service", "submit_form"} and service not in SERVICES
-    if not action or stale or action in {"start_over", "open_form", "open_orchestrator"}:
+    stale = action in {"open_service", "open_form", "submit_form"} and service not in SERVICES
+    if not action or stale or action in {"start_over", "open_orchestrator"}:
         narration = "Pick a campus service."
         if text and not selection:
             narration = "ResourcePilot works from buttons and forms. Pick a campus service."
@@ -285,6 +285,14 @@ async def _orchestrator_chat(
         await _send_card(ctx, sender, narration, cards.welcome_card())
         return
     if action == "open_service" and service in SERVICES:
+        await _send_card(
+            ctx,
+            sender,
+            f"Here is how {cards.SERVICE_TITLES[service].lower()} works.",
+            cards.service_overview_card(service),
+        )
+        return
+    if action == "open_form" and service in SERVICES:
         await _send_card(ctx, sender, FORM_PROMPTS[service], cards.service_form(service))
         return
     if action == "submit_form" and service in SERVICES:
@@ -367,7 +375,7 @@ async def _send_link(ctx: Context, sender: str, state: dict[str, Any], narration
     receipt = cards.room_link_receipt(
         dict(state["option"]), service=str(state.get("service") or "rooms")
     )
-    await _send_card(ctx, sender, narration, receipt, terminal=True)
+    await _send_card(ctx, sender, narration, receipt)
 
 
 async def _workflow_action(
@@ -422,6 +430,36 @@ async def _workflow_action(
     if action == "call_status":
         await _check_call(ctx, sender, state)
         return
+    if action == "show_booking" and state["status"] == "booked":
+        await _send_link(ctx, sender, state, "Here is your saved booking link.")
+        return
+    wellness_ready = _wellness(state) and state["status"] in {"answered", "awaiting_selection"}
+    if action == "show_wellness_view" and wellness_ready:
+        selected_view = selection.get("wellness_view")
+        if isinstance(selected_view, list):
+            selected_view = selected_view[0] if selected_view else ""
+        if selected_view == "rooms":
+            await _show_wellness_rooms(ctx, sender, state)
+            return
+        if selected_view == "events":
+            await _show_wellness_events(ctx, sender, state)
+            return
+        await _show_wellness(ctx, sender, state, prefix="Choose rooms or events, then open it. ")
+        return
+    if action == "view_wellness_event" and wellness_ready:
+        events = list((state["data"].get("wellness") or {}).get("events") or [])
+        try:
+            event = dict(events[int(str(selection.get("event_index", "")))])
+        except (IndexError, TypeError, ValueError):
+            event = {}
+        if event:
+            await _send_card(
+                ctx,
+                sender,
+                f"{event.get('title')}: verified details from the school's events calendar.",
+                cards.wellness_event_detail(workflow_id, event),
+            )
+            return
     housing_done = state.get("service") == "housing" and state["status"] == "answered"
     if action == "view_housing" and housing_done:
         hall = _hall(state, str(selection.get("option_id", "")))
@@ -441,7 +479,10 @@ async def _workflow_action(
         await _show_housing(ctx, sender, state, show_all=True)
         return
     if action == "show_results" and state["status"] == "awaiting_selection":
-        await _show_rooms(ctx, sender, state)
+        if _wellness(state):
+            await _show_wellness_rooms(ctx, sender, state)
+        else:
+            await _show_rooms(ctx, sender, state)
         return
     option = _option(state, str(selection.get("option_id", "")))
     if action == "view_room" and option:
@@ -538,6 +579,34 @@ async def _show_wellness(
         f"{prefix}Wellness at {_school_name(state)}: {rooms} open room{'s' if rooms != 1 else ''} "
         f"and {events} event{'s' if events != 1 else ''} this week. In crisis? Call or text 988.",
         cards.wellness_card(str(state["workflow_id"]), data),
+    )
+
+
+async def _show_wellness_rooms(ctx: Context, sender: str, state: dict[str, Any]) -> None:
+    data = state["data"]
+    options = list(data.get("options") or [])
+    if not options:
+        await _show_wellness(ctx, sender, state, prefix="No verified wellness room is open. ")
+        return
+    await _send_card(
+        ctx,
+        sender,
+        f"{len(options)} quiet space{'s' if len(options) != 1 else ''} at "
+        f"{_school_name(state)}, re-checked before handoff.",
+        cards.rooms_carousel(
+            str(state["workflow_id"]), options, _school_name(state), wellness=True
+        ),
+    )
+
+
+async def _show_wellness_events(ctx: Context, sender: str, state: dict[str, Any]) -> None:
+    events = list((state["data"].get("wellness") or {}).get("events") or [])
+    await _send_card(
+        ctx,
+        sender,
+        f"{len(events)} verified wellness event{'s' if len(events) != 1 else ''} this week at "
+        f"{_school_name(state)}. In crisis? Call or text 988.",
+        cards.wellness_events_card(str(state["workflow_id"]), state["data"]),
     )
 
 

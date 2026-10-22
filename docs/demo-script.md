@@ -22,15 +22,17 @@ The optional steps add about a minute.
 
 Say "hi". The Orchestrator answers with the campus services menu: **Study rooms**, **Health &
 wellness**, **Campus housing**, **Emergency (demo)**, and **My bookings**. The 988 crisis line is
-at the bottom. Type a sentence instead, and it answers with the same menu: every request starts
-from a button and a short form.
+in the carousel subtitle. Swipe through the service art. Type a sentence instead, and it answers
+with the same menu: every request starts from a card, never an inferred consequential action.
 
 ## 2. A real study room at any school (55 s)
 
-Press **Open study rooms**. Enter your school email, a day, a time of day, a duration, and the
-group size, then press **Find open rooms**.
+Press **Explore** on **Study rooms**. Show the illustrated overview, then press **Set preferences**.
+Enter your school email, a day, a time of day, a duration, and the group size in the native form,
+then press **Find open rooms**.
 
-While the progress card moves, say: "Intake keeps only the domain. The Campus Researcher matched
+As the progress relay updates its structured **Done / Now / Next** list, say: "Intake keeps only
+the domain. The Campus Researcher matched
 the school in IPEDS and found its LibCal site." For Purdue, that site lives at
 `calendar.lib.purdue.edu`, not on `libcal.com`. "Campus Rooms, a separate agent, is reading which
 rooms are open right now, and Verification checks every offer before the Planner ranks them."
@@ -63,15 +65,18 @@ booking link and press **Check this link**. The Researcher checks the pasted lin
 rules as one it found itself. Optional: paste a link on another domain first, and the same card
 comes back with the reason.
 
-Optional (30 s): press **Menu**, then **Open health & wellness** with a Purdue email. The card
-starts with 988 and 911, then shows open wellness rooms from Purdue's LibCal and the week's health
-events from `events.purdue.edu`, each with its RSVP link. Say: "It never asks about your health.
-The crisis line is static, so it shows even when a school has nothing to find."
+Optional (30 s): press **Menu**, then **Explore** on **Health & wellness**, review the safety
+overview, and fill the form with a Purdue email. The hub starts with 988 and 911 and shows verified
+room/event counts. Select **Events this week** in the choice grid, open it, then tap a list row to
+show its native detail page and official RSVP link. Return to the hub, choose **Open wellness
+rooms**, and show the native room carousel. Say: "It never asks about your health. The crisis line
+is static, so it shows even when a school has nothing to find."
 
 ## 5. Campus housing (25 s)
 
-Press **Menu**, then **Open campus housing**. Enter a Purdue, Georgia Tech, or UC Riverside email,
-pick **Incoming first-year**, tick **Air conditioning**, and press **Find housing**. The carousel
+Press **Menu**, then **Explore** on **Campus housing** and press **Set preferences**. Enter a Purdue,
+Georgia Tech, or UC Riverside email, pick **Incoming first-year**, tick **Air conditioning**, and
+press **Find housing**. The carousel
 shows each hall the school lists, matches first, with photos where the school has them. Open one:
 style, who it's for, rooms, features, price, and how it fits each criterion, with the apply link.
 Say: "Every detail comes from the hall's own page, re-opened by Verification. If the page doesn't
@@ -80,18 +85,19 @@ your criteria ruled out, and **Housing facts** for IPEDS numbers and the portal.
 
 ## 6. Optional: Emergency (demo) (30 s)
 
-Put your teammate's phone on speaker, near the microphone. Press **Menu**, then **Emergency
-(demo)**. Pick a kind (for example fire or smoke), enter where on campus and how many people, and
-submit the form. On the review card, point at "not 911" and the masked number, which shows only
-the last four digits. Say: "It can only call our demo contact, and the voice opens by saying this
-is a demo drill." Press **Call now**. The phone rings, the voice describes the emergency, and your
-teammate answers as the dispatcher. After the call, press **Check the call** to show the summary
-and transcript. Say: "One press places one call, and it is never retried. In a real emergency,
-call 911."
+Put your teammate's phone on speaker, near the microphone. Press **Menu**, then **Explore** on
+**Emergency (demo)**. Point out the illustrated demo-only safety page, press **Set preferences**,
+fill the native form, and tick **I understand: demo only**. On the native review card, point at
+"not 911" and the masked number, which shows only the last four digits. Say: "It can only call our
+demo contact, and the voice opens by saying this is a demo drill." Press **Call now**. The phone
+rings, the voice describes the emergency, and your teammate answers as the dispatcher. After the
+call, press **Check the call** to show the summary and transcript. Say: "One press places one call,
+and it is never retried. In a real emergency, call 911."
 
 ## 7. My bookings (10 s)
 
-Press **Menu**, then **My bookings**. The room from step 2 is there with its booking link.
+Press **Menu**, then **Open** on **My bookings**. The room from step 2 appears in a carousel. Press
+**Open booking** to reconstruct its booking-link detail card.
 
 ## 8. An agent profile chat (15 s)
 

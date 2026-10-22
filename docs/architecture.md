@@ -27,23 +27,23 @@ names its role and points to the Orchestrator; only the Orchestrator starts work
 
 ## Services and their chains
 
-The Orchestrator answers every chat with a card. A greeting or any free text gets the services
-menu; there is no sentence parser. Each menu button opens a form, and each form submission starts
-a workflow for one service.
+The Orchestrator answers every chat with a card. A greeting or any free text gets the native
+services carousel; there is no sentence parser. Each service opens an illustrated detail overview
+and then a native form. Only a form submission starts a workflow.
 
-Every card carries a picture: art from this repository's `assets/cards`, chosen in
+Visual cards use art from this repository's `assets/cards`, chosen in
 [resourcepilot/cards.py](../resourcepilot/cards.py) by `cards.art()` and, for each specialist's
 progress and status cards, `cards.agent_art()`. Housing halls use the school's own `og:image`
-photo, and wellness events use the event's own photo, with the repository art as the fallback.
-Image URLs are built from `CARD_IMAGE_BASE` and are always https; with it empty, every card is
-sent without images and stays valid. Forms and the emergency review are custom cards, because the
-predefined kinds cannot show images, and keep the same field names and selections.
+photo, and wellness events use the event's own photo, with repository art as the fallback. Image
+URLs are built from `CARD_IMAGE_BASE` and are always https; with it empty, every card stays valid.
+Native forms and the emergency review deliberately follow illustrated detail screens because the
+predefined `form` and `review` schemas cannot show images.
 
 | Service | Specialist chain | Ends with |
 | --- | --- | --- |
 | `rooms` | Intake → Campus Researcher → Campus Rooms → Verification → Planner | A rooms carousel, then the re-check and a booking link |
-| `wellness` | Intake → Campus Researcher → Campus Rooms → Verification → Planner | A wellness card: crisis line, open wellness rooms, the week's events (status `awaiting_selection`) |
-| `wellness`, no room system | Intake → Campus Researcher → Verification | The same card without rooms (status `answered`) |
+| `wellness` | Intake → Campus Researcher → Campus Rooms → Verification → Planner | A wellness hub: crisis line, live counts, and a choice grid for the room carousel or tappable events (status `awaiting_selection`) |
+| `wellness`, no room system | Intake → Campus Researcher → Verification | The same hub without rooms (status `answered`) |
 | `housing` | Intake → Campus Researcher → Verification → Planner | A halls carousel, or the housing facts card when no hall could be read (status `answered`) |
 | `emergency`, preview | Emergency Dispatcher (`phase="preview"`) | A review card with **Call now** and **Cancel** (status `awaiting_call`) |
 | `emergency`, call | Emergency Dispatcher (`phase="call"`) | A call card with **Check the call** (status `called`) |
@@ -52,7 +52,8 @@ A chain that ends at Verification is an answer (`answered`), and so is housing; 
 ends at the Planner has options to re-check (`awaiting_selection`).
 
 **My bookings** starts no chain. The Orchestrator reads your five most recent workflows whose
-status is `booked` from the shared store and shows them as one card.
+status is `booked` from the shared store, shows them as a carousel, and reconstructs the selected
+booking-link detail card by workflow ID.
 
 Before any workflow exists, the Orchestrator reduces every email field to its domain
 (`scrub_fields`). The local part of the address is never stored, sent, or logged.
@@ -111,7 +112,7 @@ typical room charge, else room and board combined.
 Results are cached per domain. A school whose halls cannot be read gets the facts card.
 
 For wellness it finds the room system the same way but never pauses for a link: rooms are
-optional on the wellness card. It also looks for the school's public Localist calendar at
+optional on the wellness hub. It also looks for the school's public Localist calendar at
 `events.<domain>/api/2/events`, then `calendar.<domain>`, then `<school>.localist.com` (accepted
 only when its home page links back to the school). It keeps up to eight events in the next seven
 days whose title, keywords, tags, or filter names read as health or wellness, with only a capped
@@ -165,7 +166,9 @@ For wellness, a search with no acceptable room is not a failure: Verification pa
 reason on as `room_note`, and the Planner returns no options instead of an error. Verification
 also re-fetches the events feed itself and drops events it no longer lists. Picking a wellness
 room uses the same live re-check and booking link as a study room; a room taken during the
-re-check returns to the wellness card without it.
+re-check returns to the wellness hub without it. The hub uses a `choice_grid`; its room choice
+opens the native room carousel and its events choice opens a custom list whose tappable rows lead
+to native event detail cards.
 
 The Planner turns the accepted offers into up to six room options, earliest opening first and then
 the snuggest fit for the group. The first option is labeled **Earliest opening**. Each option has

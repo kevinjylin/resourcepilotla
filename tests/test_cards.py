@@ -129,13 +129,17 @@ def _metadata(message):
 
 
 FACTORIES = [
-    (cards.welcome_card, "custom"),
-    (lambda: cards.rooms_form(upcoming_days(NOW)), "custom"),
-    (lambda: cards.wellness_form(upcoming_days(NOW)), "custom"),
-    (cards.housing_form, "custom"),
-    (cards.emergency_form, "custom"),
-    (lambda: cards.service_form("rooms"), "custom"),
-    (lambda: cards.service_form("housing"), "custom"),
+    (cards.welcome_card, "carousel"),
+    (lambda: cards.service_overview_card("rooms"), "detail"),
+    (lambda: cards.service_overview_card("wellness"), "detail"),
+    (lambda: cards.service_overview_card("housing"), "detail"),
+    (lambda: cards.service_overview_card("emergency"), "detail"),
+    (lambda: cards.rooms_form(upcoming_days(NOW)), "form"),
+    (lambda: cards.wellness_form(upcoming_days(NOW)), "form"),
+    (cards.housing_form, "form"),
+    (cards.emergency_form, "form"),
+    (lambda: cards.service_form("rooms"), "form"),
+    (lambda: cards.service_form("housing"), "form"),
     (lambda: cards.room_link_card("workflow-1", "MIT"), "custom"),
     (lambda: cards.progress_card("workflow-1", "researcher", ("intake", "researcher")), "custom"),
     (lambda: cards.progress_card("workflow-1", "recheck"), "custom"),
@@ -149,7 +153,7 @@ FACTORIES = [
     (lambda: cards.housing_card(HOUSING), "detail"),
     (lambda: cards.housing_card({}), "detail"),
     (lambda: cards.bookings_card([]), "detail"),
-    (lambda: cards.bookings_card([BOOKED]), "detail"),
+    (lambda: cards.bookings_card([BOOKED]), "carousel"),
     (lambda: cards.error_card("Something failed", service="rooms"), "custom"),
     (lambda: cards.error_card("Something failed"), "custom"),
     (lambda: cards.notice_card("Saved", "Your link was checked.", badge="Done"), "custom"),
@@ -166,10 +170,19 @@ FACTORIES = [
     (lambda: cards.no_housing_match_card("workflow-1", HALLS), "custom"),
     (lambda: cards.wellness_card("workflow-1", {"school": {"school_name": "Test U"}}), "custom"),
     (lambda: cards.wellness_card("workflow-1", WELLNESS), "custom"),
-    (lambda: cards.emergency_review_card("workflow-1", PREVIEW), "custom"),
+    (lambda: cards.wellness_events_card("workflow-1", WELLNESS), "custom"),
+    (
+        lambda: cards.wellness_event_detail("workflow-1", WELLNESS["wellness"]["events"][0]),
+        "detail",
+    ),
+    (lambda: cards.emergency_review_card("workflow-1", PREVIEW), "review"),
     (lambda: cards.emergency_call_card("workflow-1", CALL), "custom"),
     (lambda: cards.emergency_call_card("workflow-1", CALL, CALL_STATUS), "custom"),
 ]
+
+
+def test_ui_exercises_every_official_card_kind() -> None:
+    assert {kind for _, kind in FACTORIES} == cards.CARD_KINDS
 
 
 @pytest.mark.parametrize(("factory", "kind"), FACTORIES)
@@ -232,7 +245,8 @@ def test_every_selection_uses_a_known_action(factory, kind) -> None:
 
 
 def test_terminal_flag_is_a_string() -> None:
-    message = cards.card_message("Done", *cards.room_link_receipt(OPTION), terminal=True)
+    informational = ("custom", {"root": {"type": "text", "value": "All done"}})
+    message = cards.card_message("Done", *informational, terminal=True)
     assert _metadata(message)["is_terminal"] == "true"
 
 
@@ -245,6 +259,7 @@ def test_terminal_flag_is_a_string() -> None:
         cards.emergency_form,
         lambda: cards.room_link_card("workflow-1", "MIT"),
         lambda: cards.emergency_review_card("workflow-1", PREVIEW),
+        lambda: cards.room_link_receipt(OPTION),
         lambda: ("form", {"title": "x", "fields": [], "submit_cta": {"label": "Go"}}),
     ],
 )
@@ -277,6 +292,39 @@ def test_undocumented_fields_are_rejected_before_sending(kind, payload, message)
         cards.card_message("x", kind, payload)
 
 
+@pytest.mark.parametrize(
+    ("kind", "payload", "message"),
+    [
+        (
+            "form",
+            {"title": "x", "fields": [{"name": "a", "kind": "select", "label": "A"}]},
+            "non-empty options",
+        ),
+        (
+            "custom",
+            {
+                "root": {
+                    "type": "input",
+                    "name": "a",
+                    "kind": "select",
+                    "label": "A",
+                    "options": [],
+                }
+            },
+            "non-empty options",
+        ),
+        (
+            "custom",
+            {"root": {"type": "choice_grid", "name": "a", "choices": [], "multi": False}},
+            "non-empty choices",
+        ),
+    ],
+)
+def test_selectors_require_choices(kind, payload, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        cards.card_message("x", kind, payload)
+
+
 def test_card_rejects_oversize_payload() -> None:
     with pytest.raises(ValueError, match="64KB"):
         cards.card_message("too big", "custom", {"root": {"type": "text", "value": "x" * 70_000}})
@@ -300,7 +348,15 @@ def test_custom_card_depth_limit() -> None:
 
 
 def test_services_menu_offers_four_services_and_bookings() -> None:
-    _, menu = cards.welcome_card()
+    kind, menu = cards.welcome_card()
+    assert kind == "carousel"
+    assert [item["id"] for item in menu["items"]] == [
+        "service-rooms",
+        "service-wellness",
+        "service-housing",
+        "service-emergency",
+        "service-bookings",
+    ]
     assert list(_selections(menu)) == [
         {"action": "open_service", "service": "rooms"},
         {"action": "open_service", "service": "wellness"},
@@ -317,10 +373,26 @@ def test_services_menu_offers_four_services_and_bookings() -> None:
 
 
 @pytest.mark.parametrize("service", ["rooms", "wellness", "housing", "emergency"])
+def test_service_overview_bridges_menu_to_native_form(service) -> None:
+    kind, overview = cards.service_overview_card(service)
+    assert kind == "detail"
+    assert overview["hero_image"] == cards.art(f"svc-{service}")
+    assert [cta["selection"] for cta in overview["ctas"]] == [
+        {"action": "open_form", "service": service},
+        {"action": "start_over"},
+    ]
+    if service == "wellness":
+        assert cards.CRISIS_TEXT in json.dumps(overview, ensure_ascii=False)
+    if service == "emergency":
+        assert cards.DEMO_NOTICE in json.dumps(overview, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("service", ["rooms", "wellness", "housing", "emergency"])
 def test_every_form_submits_its_own_service(service) -> None:
-    _, form = cards.service_form(service)
+    kind, form = cards.service_form(service)
+    assert kind == "form"
     fields = cards.card_inputs(form)
-    assert fields and all(field["type"] == "input" for field in fields)
+    assert fields and all("kind" in field and "type" not in field for field in fields)
     for field in fields:
         if field["kind"] == "select":
             assert field["options"]
@@ -425,10 +497,15 @@ def test_room_link_receipt_is_a_link_not_a_reservation() -> None:
     assert rows["Next step"] == "Not reserved by ResourcePilot: book it with your own sign-in"
     assert rows["Re-checked"].startswith("Open when ResourcePilot re-checked it live")
     assert [cta["selection"] for cta in receipt["ctas"]] == [
-        {"action": "open_service", "service": "rooms"},
+        {"action": "open_form", "service": "rooms"},
+        {"action": "show_bookings"},
         {"action": "start_over"},
     ]
-    assert [cta["label"] for cta in receipt["ctas"]] == ["Find another room", "Menu"]
+    assert [cta["label"] for cta in receipt["ctas"]] == [
+        "Find another room",
+        "My bookings",
+        "Menu",
+    ]
     assert "sub_options" not in receipt  # terminal-safe: no input beyond its CTA buttons
     assert not PAYMENT_WORDS.findall(json.dumps(receipt))
     _, page = cards.room_link_receipt(PAGE_OPTION)
@@ -455,18 +532,22 @@ def test_housing_card_shows_sources_and_official_links() -> None:
 
 
 def test_bookings_card_lists_booked_rooms_with_their_links() -> None:
-    _, empty = cards.bookings_card([])
+    empty_kind, empty = cards.bookings_card([])
+    assert empty_kind == "detail"
     assert empty["summary_rows"] == [{"label": "Bookings", "value": "No bookings yet"}]
-    _, card = cards.bookings_card([BOOKED, {"status": "booked", "data": {}}])
-    assert card["summary_rows"] == [
-        {
-            "label": LINE["slot_label"],
-            "value": f"HSSE 2101 · Purdue University: {LINE['handoff_url']}",
-        }
-    ]
-    assert card["ctas"][0]["selection"] == {"action": "start_over"}
+    kind, card = cards.bookings_card([BOOKED, {"status": "booked", "data": {}}])
+    assert kind == "carousel"
+    assert len(card["items"]) == 1
+    item = card["items"][0]
+    assert item["title"] == "HSSE 2101"
+    assert "Purdue University" in item["subtitle"]
+    assert LINE["slot_label"] in item["subtitle"]
+    assert item["primary_cta"]["selection"] == {
+        "action": "show_booking",
+        "workflow_id": "workflow-1",
+    }
     _, page = cards.bookings_card([{**BOOKED, "option": PAGE_OPTION}])
-    assert page["summary_rows"][0]["label"] == describe_window(ROOM_BRIEF)
+    assert describe_window(ROOM_BRIEF) in page["items"][0]["subtitle"]
 
 
 def test_progress_card_marks_finished_and_current_stages() -> None:
@@ -477,13 +558,14 @@ def test_progress_card_marks_finished_and_current_stages() -> None:
     _, card = cards.progress_card("workflow-123456789", "verification", chain)
     assert card["root"]["children"][0]["src"] == cards.art("role-verification")
     children = card["root"]["children"][1:]
-    assert children[0] == {"type": "badge", "label": "Verifying every result", "variant": "info"}
-    steps = children[1]["value"].splitlines()
-    assert steps == [
-        "✓ Reading your form",
-        "✓ Researching your school",
-        "✓ Reading open rooms",
-        "• Verifying every result",
+    assert children[0] == {"type": "badge", "label": "Step 4 of 5", "variant": "info"}
+    steps = children[1]["items"]
+    assert [(item["children"][0]["label"], item["children"][1]["value"]) for item in steps] == [
+        ("Done", "Reading your form"),
+        ("Done", "Researching your school"),
+        ("Done", "Reading open rooms"),
+        ("Now", "Verifying every result"),
+        ("Next", "Ranking open rooms"),
     ]
     assert children[2]["value"] == "Workflow workflow"
     assert list(_selections(card)) == [
@@ -491,20 +573,27 @@ def test_progress_card_marks_finished_and_current_stages() -> None:
     ]
     _, recheck = cards.progress_card("workflow-1", "recheck")
     assert recheck["root"]["children"][0]["src"] == cards.art("role-campus-rooms")
-    assert recheck["root"]["children"][1]["label"] == "Re-checking your room"
-    assert len(recheck["root"]["children"]) == 4  # picture, badge, workflow, button: no steps
+    assert recheck["root"]["children"][1]["label"] == "Live update"
+    assert recheck["root"]["children"][2]["items"][0]["children"][1]["value"] == (
+        "Re-checking your room"
+    )
+    assert len(recheck["root"]["children"]) == 5
 
 
 def test_known_actions_cover_the_room_and_demo_call_flows_only() -> None:
     assert set(cards.KNOWN_ACTIONS) == {
         "start_over",
         "open_service",
+        "open_form",
         "submit_form",
         "show_bookings",
+        "show_booking",
         "show_status",
         "view_room",
         "recheck_room",
         "show_results",
+        "show_wellness_view",
+        "view_wellness_event",
         "submit_link",
         "view_housing",
         "show_housing_facts",
@@ -589,39 +678,70 @@ def test_wellness_card_always_carries_the_crisis_line() -> None:
     assert cards.CRISIS_TEXT in encoded
     assert "No public room-booking system found for Test U" in encoded
     assert "No public events calendar found for Test U" in encoded
-    _, form = cards.wellness_form()
-    children = form["root"]["children"]
-    assert children[0]["label"] == "Crisis help · 24/7"
-    assert children[1]["value"] == cards.CRISIS_TEXT  # before the picture
-    assert children[2]["src"] == cards.art("svc-wellness")
+    form_kind, form = cards.wellness_form()
+    assert form_kind == "form"
+    assert "988" in form["title"]
     names = {field["name"] for field in cards.card_inputs(form)}
     assert names == {"email", "day", "window", "duration"}
 
 
-def test_wellness_card_rooms_use_stable_option_ids() -> None:
-    data = {"school": {"school_name": "Test U"}, "options": [OPTION]}
-    kind, payload = cards.wellness_card("wf-1", data)
+def test_wellness_hub_choice_grid_routes_to_rooms_and_events() -> None:
+    kind, payload = cards.wellness_card("wf-1", WELLNESS)
     cards.card_message("x", kind, payload)
-    assert {"action": "view_room", "workflow_id": "wf-1", "option_id": OPTION["option_id"]} in list(
-        _selections(payload)
+    grids = [field for field in cards.card_inputs(payload) if field["type"] == "choice_grid"]
+    assert len(grids) == 1
+    assert grids[0]["name"] == "wellness_view"
+    assert [choice["value"] for choice in grids[0]["choices"]] == ["rooms", "events"]
+    assert cards.card_buttons(payload)[0] == (
+        "Open selection",
+        {"action": "show_wellness_view", "workflow_id": "wf-1"},
     )
+    _, carousel = cards.rooms_carousel("wf-1", [OPTION], "Test U", wellness=True)
+    assert carousel["items"][0]["primary_cta"]["selection"] == {
+        "action": "view_room",
+        "workflow_id": "wf-1",
+        "option_id": OPTION["option_id"],
+    }
     _, detail = cards.room_detail("wf-1", OPTION, wellness=True)
     assert {"label": "Need help now?", "value": cards.CRISIS_TEXT} in detail["summary_rows"]
     _, receipt = cards.room_link_receipt(OPTION, service="wellness")
-    assert receipt["ctas"][0]["selection"] == {"action": "open_service", "service": "wellness"}
+    assert receipt["ctas"][0]["selection"] == {"action": "open_form", "service": "wellness"}
 
 
-def test_wellness_prose_only_opens_the_form() -> None:
+def test_wellness_events_are_tappable_and_open_a_native_detail() -> None:
+    _, event_list = cards.wellness_events_card("wf-1", WELLNESS)
+    actions = [
+        selection for selection in _selections(event_list) if selection["action"].startswith("view")
+    ]
+    assert actions == [
+        {"action": "view_wellness_event", "workflow_id": "wf-1", "event_index": "0"},
+        {"action": "view_wellness_event", "workflow_id": "wf-1", "event_index": "1"},
+    ]
+    kind, detail = cards.wellness_event_detail("wf-1", WELLNESS["wellness"]["events"][0])
+    assert kind == "detail"
+    assert detail["hero_image"] == EVENT_PHOTO
+    assert {"label": "Official RSVP", "value": "https://events.x.edu/1"} in (detail["summary_rows"])
+
+
+def test_wellness_prose_only_opens_the_safe_overview() -> None:
     for text in ("any wellness events?", "I need a meditation space", "flu shot near me"):
         assert cards.parse_selection(text) == {"action": "open_service", "service": "wellness"}
 
 
 def test_emergency_cards_say_not_911_and_only_a_button_places_the_call() -> None:
-    _, form = cards.emergency_form()
-    assert form["root"]["children"][1]["value"] == cards.DEMO_NOTICE  # before the picture
-    assert "never 911" in json.dumps(form)
+    form_kind, form = cards.emergency_form()
+    assert form_kind == "form"
+    assert "not 911" in form["title"]
+    fields = {field["name"]: field for field in form["fields"]}
+    assert fields["demo_only"] == {
+        "name": "demo_only",
+        "kind": "checkbox",
+        "label": "I understand: demo only",
+        "required": True,
+    }
     kind, review = cards.emergency_review_card("wf-9", PREVIEW)
     cards.card_message("x", kind, review)
+    assert kind == "review"
     assert cards.card_buttons(review) == [
         ("Call now", {"action": "place_call", "workflow_id": "wf-9"}),
         ("Cancel", {"action": "start_over"}),
@@ -692,6 +812,9 @@ def test_every_card_has_a_picture_from_the_repository(factory, kind, monkeypatch
     monkeypatch.delenv("CARD_IMAGE_BASE", raising=False)
     _, payload = factory()
     urls = _image_urls(payload)
+    if kind in {"form", "review"}:
+        assert not urls  # Native ASI:One forms/reviews follow an illustrated detail screen.
+        return
     assert urls, "every card carries at least one image"
     for url in set(urls) - OWN_PHOTOS:
         assert url.startswith(cards.DEFAULT_IMAGE_BASE + "cards/"), url
@@ -714,37 +837,34 @@ def test_image_base_can_move_to_another_https_host(monkeypatch) -> None:
     assert cards.art("hero-info") == "https://cdn.example.org/rp/cards/hero-info.jpg"
 
 
-def test_menu_is_a_picture_grid_with_my_bookings_and_the_crisis_line() -> None:
-    _, menu = cards.welcome_card()
-    children = menu["root"]["children"]
-    assert children[0]["src"] == cards.art("menu-banner")
-    rows = [child for child in children if child.get("direction") == "row"]
-    assert [len(row["children"]) for row in rows] == [2, 2, 1]
-    tiles = [tile for row in rows for tile in row["children"]]
-    assert [tile["children"][0]["src"] for tile in tiles] == [
+def test_menu_is_a_native_picture_carousel_with_bookings_and_crisis_help() -> None:
+    kind, menu = cards.welcome_card()
+    assert kind == "carousel"
+    assert [item["image"] for item in menu["items"]] == [
         cards.art(f"svc-{name}")
         for name in ("rooms", "wellness", "housing", "emergency", "bookings")
     ]
     assert [selection for _, selection in cards.card_buttons(menu)][-1] == {
         "action": "show_bookings"
     }
-    assert children[-1]["value"] == cards.CRISIS_TEXT
+    assert cards.CRISIS_TEXT in menu["subtitle"]
 
 
 def test_event_photos_come_from_the_feed_and_fall_back_to_art() -> None:
-    _, card = cards.wellness_card("workflow-1", WELLNESS)
-    urls = _image_urls(card)
+    _, hub = cards.wellness_card("workflow-1", WELLNESS)
+    assert cards.art("wellness-hero") in _image_urls(hub)
+    assert cards.art("room-wellness") in _image_urls(hub)
+    _, event_list = cards.wellness_events_card("workflow-1", WELLNESS)
+    urls = _image_urls(event_list)
     assert EVENT_PHOTO in urls
     assert cards.art("event-default") in urls
-    assert cards.art("wellness-hero") in urls
-    assert cards.art("room-wellness") in urls
-    encoded = json.dumps(card, ensure_ascii=False)
+    encoded = json.dumps(hub, ensure_ascii=False)
     assert encoded.index(cards.CRISIS_TEXT) < encoded.index("wellness-hero")
     unsafe = {**WELLNESS["wellness"]["events"][0], "photo": "http://x.edu/a.jpg"}
-    _, card = cards.wellness_card(
+    _, event_list = cards.wellness_events_card(
         "workflow-1", {**WELLNESS, "wellness": {"status": "found", "events": [unsafe]}}
     )
-    assert "http://x.edu/a.jpg" not in _image_urls(card)
+    assert "http://x.edu/a.jpg" not in _image_urls(event_list)
 
 
 def test_halls_show_their_own_photo_else_the_default_hall() -> None:
@@ -770,10 +890,11 @@ def test_room_detail_shows_its_carousel_picture() -> None:
     assert receipt["hero_image"] == cards.art("hero-receipt")
 
 
-def test_emergency_cards_keep_every_disclaimer_with_pictures() -> None:
+def test_emergency_flow_keeps_disclaimers_across_native_and_visual_cards() -> None:
+    _, overview = cards.service_overview_card("emergency")
+    assert overview["hero_image"] == cards.art("svc-emergency")
+    assert cards.DEMO_NOTICE in json.dumps(overview, ensure_ascii=False)
     for _, card in (
-        cards.emergency_form(),
-        cards.emergency_review_card("wf-9", PREVIEW),
         cards.emergency_call_card("wf-9", CALL),
         cards.emergency_call_card("wf-9", CALL, CALL_STATUS),
     ):
@@ -787,5 +908,8 @@ def test_emergency_cards_keep_every_disclaimer_with_pictures() -> None:
         assert "In a real emergency, call 911." in children[1]["value"]
         encoded = json.dumps(card, ensure_ascii=False)
         assert not re.search(r"\d{5,}", encoded)  # never more than the last four digits
+    _, form = cards.emergency_form()
+    assert "not 911" in form["title"] and not _image_urls(form)
     _, review = cards.emergency_review_card("wf-9", PREVIEW)
-    assert cards.art("hero-call") in _image_urls(review)
+    assert cards.DEMO_NOTICE in json.dumps(review, ensure_ascii=False)
+    assert not _image_urls(review)
