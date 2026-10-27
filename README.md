@@ -9,7 +9,7 @@ detail pages, and safety reviews.
 | --- | --- | --- |
 | **Study rooms** | Real open library study rooms at your school, re-checked live, then a free booking link. You book with your own sign-in. | Live: your school's LibCal, found by the Campus Researcher |
 | **Health & wellness** | Open meditation, reflection, and sensory rooms at your school, the week's health and wellness events with RSVP links, and the 988 crisis line on every card | Live: your school's LibCal and its public Localist events calendar |
-| **Campus housing** | Every on-campus hall your school lists, with its photo, style, who it's for, features, and listed price, matched to what you need, plus IPEDS facts and the apply link | Live: the school's own housing pages plus IPEDS |
+| **Campus housing** | Every on-campus hall your school lists, with its photo, style, who it's for, features, and listed price, matched to what you need, plus IPEDS facts and the apply link. The facts are free; the hall match can be a paid step (Stripe test mode or testnet FET) | Live: the school's own housing pages plus IPEDS |
 | **Emergency (demo)** | A demo-drill phone call in which the voice, speaking as the student, reports an emergency to your team's demo contact, never 911, then the call's summary and transcript | ElevenLabs voice agent over your own Twilio number or SIP trunk (e.g. Telnyx) |
 | **My bookings** | Your recent re-checked rooms and their booking links | ResourcePilot's workflow records |
 
@@ -38,6 +38,16 @@ school's booking link: **you book it with your own sign-in**. ResourcePilot neve
 - **Recovery is part of the product.** If a room is taken during the re-check, the Planner
   reroutes to the other open rooms. A lost task is retried once. If LibCal's live times fail, you
   get the school's booking link, never invented rooms.
+- **One paid step, checked by the seller.** The hall-by-hall housing match is the only paid step,
+  over Fetch's Agent Payment Protocol, in Stripe test mode or testnet FET. The Orchestrator checks
+  every payment with Stripe or the testnet itself and uses each transaction ID once, so a replayed
+  commit unlocks nothing twice.
+
+**Business model.** Rooms, wellness, and housing facts are free; students pay a small one-time fee
+for the hall match, which saves an evening of reading hall pages, rate tables, and PDFs. Longer
+term, schools' housing and student-affairs offices would pay to publish their own rooms, halls, and
+events to ResourcePilot directly instead of being crawled. Only the test-mode hall-match fee is
+built today.
 
 This repository uses public Fetch.ai packages and documentation only.
 
@@ -111,7 +121,7 @@ limit first. This is an account-bound step that you must do yourself in the brow
 
 | Key | Agent | Responsibility | Protocols | Port |
 | --- | --- | --- | --- | --- |
-| `orchestrator` | ResourcePilot Orchestrator | Runs the ASI:One chat, the services menu, cards, and the workflow | Chat, Tasks | 8000 |
+| `orchestrator` | ResourcePilot Orchestrator | Runs the ASI:One chat, the services menu, cards, and the workflow | Chat, Tasks, Payment | 8000 |
 | `intake` | ResourcePilot Intake | Turns a submitted form into a validated brief, keeping only the school domain | Chat, Tasks | 8001 |
 | `researcher` | ResourcePilot Campus Researcher | Finds a school's room system, housing pages, and events feed from its email domain | Chat, Tasks | 8002 |
 | `campus_rooms` | ResourcePilot Campus Rooms | Reads open study and wellness rooms live and re-checks one before handing over its link | Chat, Tasks | 8003 |
@@ -121,7 +131,9 @@ limit first. This is an account-bound step that you must do yourself in the brow
 | `emergency` | ResourcePilot Emergency Dispatch | Places one demo-drill call to your team's demo contact, never 911, and reports the transcript | Chat, Tasks | 8007 |
 
 "Chat" is the Agent Chat Protocol; "Tasks" is ResourcePilot's own `ResourcePilotTasks` protocol
-(`TaskRequest`, `TaskResult`, `AuditEvent`). Every agent publishes both manifests. Each one's
+(`TaskRequest`, `TaskResult`, `AuditEvent`). Every agent publishes both manifests. "Payment" is
+Fetch's Agent Payment Protocol: only the Orchestrator speaks it, as the seller of the optional hall
+match. Each one's
 profile chat answers with a status card that names its role and points to the Orchestrator.
 
 The Orchestrator delegates every step with `ctx.send` and correlated `TaskRequest`/`TaskResult`
@@ -148,6 +160,9 @@ Wellness      Intake ─▶ Campus Researcher (room system + events feed) ─▶
 
 Housing       Intake ─▶ Campus Researcher (reads each hall's page) ─▶ Verification (re-opens
               each hall and link) ─▶ Planner (matches your criteria) ─▶ halls carousel ─▶ hall
+              With payments set up: Verification ─▶ hall-match offer (facts stay free)
+                 ─▶ "Unlock my hall match" ─▶ Stripe test card or testnet FET, checked by the
+                 Orchestrator ─▶ Planner
 
 Emergency     Emergency Dispatcher (preview: checks the form) ─▶ review card
 (demo)        "Call now" ─▶ Emergency Dispatcher places one call to the demo contact ─▶ call card
@@ -195,6 +210,13 @@ the call, at most once per workflow, and it is never retried. Cards show only th
 four digits, and every emergency card says to call 911 in a real emergency. Only the Emergency
 Dispatcher talks to ElevenLabs, and errors never include the API key or the full number.
 
+The paid hall match is test mode only. Put your Stripe **test** keys in `.env`
+(`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`) and/or set `ACCEPT_TESTNET_FET=true`; a live key
+stops the Orchestrator from starting. The payment buys ResourcePilot's match, never housing. The
+Orchestrator checks every payment itself: the Stripe Checkout Session it created for that request,
+paid, for exactly the price; or a testnet transfer of at least the price from your wallet to its
+own. Each payment unlocks one search, once. See [docs/trust-model.md](docs/trust-model.md).
+
 ## Useful commands
 
 ```bash
@@ -225,7 +247,8 @@ and never books anything.
 
 The test suite drives the real agent handlers in process: every role is loaded as its own module
 with its own address. Every live source (IPEDS, LibCal, Localist, and school websites) is served by
-offline fakes, and the ElevenLabs API is mocked, so no test touches the network or places a call.
+offline fakes, and ElevenLabs, Stripe, and the Fetch testnet are mocked, so no test touches the
+network, places a call, or makes a payment.
 Set `TEST_DATABASE_URL` to also run the store contract and the end-to-end network tests on real
 Postgres. CI does this.
 
@@ -244,8 +267,10 @@ Postgres. CI does this.
 
 ## What this does not claim
 
-ResourcePilot takes no payments of any kind: there is no payment rail, no Stripe integration, no
-FET, and no escrow. It does not reserve study or wellness rooms, RSVP to events, or apply for,
+The one paid step is the optional housing hall match, and it runs in test mode only: Stripe test
+cards and testnet FET, so no real money moves. It pays ResourcePilot for the match, never a school.
+Live payments in ASI:One are not claimed until they are recorded; the tests mock Stripe and the
+testnet. ResourcePilot does not reserve study or wellness rooms, RSVP to events, or apply for,
 reserve, or pay for housing. It links you to your school's own site, where you sign in yourself.
 Hall details come from each school's own pages and only as far as those pages say: schools whose
 halls are not linked from the housing site, or are on a separate site, fall back to the housing

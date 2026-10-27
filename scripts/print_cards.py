@@ -118,7 +118,7 @@ def show(title: str, card: tuple[str, dict[str, Any]], *, terminal: bool = False
 
 
 def samples() -> None:
-    show("Set school", cards.school_card())
+    show("Set your school", cards.school_card())
     show("Campus services menu", cards.welcome_card("example.edu"))
     for service in ("rooms", "wellness", "housing", "emergency"):
         show(f"{service} overview", cards.service_overview_card(service, "example.edu"))
@@ -137,6 +137,9 @@ def samples() -> None:
     show("Sample room detail", cards.room_detail("demo", SAMPLE_OPTIONS[0]))
     show("Sample booking link", cards.room_link_receipt(SAMPLE_OPTIONS[0]))
     show("Sample housing", cards.housing_card(SAMPLE_HOUSING))
+    prices = ["$1.00 by card (Stripe test mode)", "1 FET on the Fetch testnet"]
+    show("Hall match offer", cards.housing_unlock_card("demo", SAMPLE_HOUSING, prices))
+    show("Hall match payment", cards.housing_payment_card("demo", prices))
     show("No bookings yet", cards.bookings_card([]))
     show(
         "Recent bookings",

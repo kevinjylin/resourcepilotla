@@ -57,7 +57,9 @@ loopback only.
   `DATABASE_URL`; startup fails instead of silently using process-local memory when it is missing.
 - Allow outbound https. The Campus Researcher, Campus Rooms, and Verification read IPEDS (the
   Urban Institute Education Data API), schools' websites, and LibCal. They need no API keys. The
-  Emergency Dispatcher calls the ElevenLabs API and needs `ELEVENLABS_API_KEY`.
+  Emergency Dispatcher calls the ElevenLabs API and needs `ELEVENLABS_API_KEY`. The Orchestrator
+  calls `api.stripe.com` and the Fetch testnet only when the paid hall match is set up; keep
+  `STRIPE_SECRET_KEY` in the secret manager too.
 - Card pictures load in the student's browser from `CARD_IMAGE_BASE`, this repository's
   `assets/` by default. If you deploy from a fork, push `assets/` and point it there, or leave it
   empty to send cards without images.

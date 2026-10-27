@@ -2,8 +2,9 @@
 
 ResourcePilot takes requests only from cards and forms, never free text. Every brief is bounded
 and deterministic, and a missing or invalid field raises a ``ValueError`` the Orchestrator shows
-with the form again. A school email is reduced to its domain before the request is stored; the
-part before ``@`` is never kept, logged, or sent to another agent.
+with the form again. The student sets their school email once; it is reduced to its domain before
+it is stored, and the Orchestrator adds that domain to every form. The part before ``@`` is never
+kept, logged, or sent to another agent.
 """
 
 from __future__ import annotations

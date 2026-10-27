@@ -6,7 +6,8 @@ campus housing facts with official links, and an emergency demo drill that phone
 never 911. Every reply is a card: an image carousel, illustrated service overview, native form,
 live agent relay, selectable results, detail and review screens, wellness choice grid, tappable
 events, and recent-booking carousel. ResourcePilot never reserves a room or applies for housing,
-so no card asks for payment.
+or pays a school. The optional hall-by-hall match can be unlocked only with Stripe test mode or
+testnet FET; housing facts and official links stay free.
 
 Every payload uses only the fields documented on the Innovation Lab interactive-cards page.
 ASI:One silently falls back to plain text when a payload has an unexpected shape, so
@@ -144,13 +145,18 @@ KNOWN_ACTIONS = (
     "view_housing",
     "show_housing_facts",
     "show_all_housing",
+    "unlock_housing",
     "place_call",
     "call_status",
     "open_orchestrator",
 )
+# Any action in this set must come from an interactive card with its stable IDs.
+INPUT_ACTIONS = frozenset(
+    {"set_school", "submit_form", "submit_link", "recheck_room", "place_call", "unlock_housing"}
+)
 # Bounded allowlist for planner-mediated prose: it only opens menus and views. Submitting a form,
 # re-checking a room, submitting a link, or placing a demo call needs the stable IDs that only a
-# card selection carries.
+# card selection carries. The housing unlock also requires its stable workflow ID.
 PROSE_ACTIONS = ("open_orchestrator", "show_status", "show_results", "show_bookings", "start_over")
 # Prose that only opens a service overview, never submits a form.
 SERVICE_WORDS = (
@@ -452,6 +458,21 @@ def _buttons(actions: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
             for index, (label, selection) in enumerate(actions)
         ],
     }
+
+
+def _rows(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Summary rows as label-over-value text pairs for custom cards."""
+    return [
+        {
+            "type": "group",
+            "direction": "column",
+            "children": [
+                {"type": "text", "value": row["label"], "style": "muted"},
+                {"type": "text", "value": row["value"], "style": "body"},
+            ],
+        }
+        for row in rows
+    ]
 
 
 def card_buttons(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -1580,6 +1601,80 @@ def housing_detail(
         payload = {"title": payload["title"], "hero_image": str(hall["photo"]), **payload}
         return "detail", payload
     return _with_hero(("detail", payload), "hall-default", str(hall["name"]))
+
+
+# Said on every payment card: what the money buys, and that none of it is real.
+MATCH_NOT_HOUSING = (
+    "This pays ResourcePilot for the match, never your school. ResourcePilot never applies for, "
+    "reserves, or pays for housing."
+)
+TEST_MONEY = "Test mode: Stripe test cards and testnet FET only. No real money moves."
+
+
+def housing_unlock_card(
+    workflow_id: str, data: dict[str, Any], prices: list[str]
+) -> tuple[str, dict[str, Any]]:
+    """Offer the optional paid match after the free housing facts are ready."""
+    school = str(data.get("school", {}).get("school_name") or "your school")
+    halls = len(dict(data.get("housing") or {}).get("options") or [])
+    plural = "s" if halls != 1 else ""
+    children: list[dict[str, Any]] = [
+        {"type": "badge", "label": f"{halls} hall{plural} re-checked", "variant": "success"},
+        {
+            "type": "text",
+            "value": f"ResourcePilot read {halls} hall{plural} from {school}'s own pages, and "
+            "Verification re-opened each one. Unlock the Planner's hall-by-hall match to your "
+            "criteria, with each hall's photo, features, and listed price.",
+            "style": "body",
+        },
+        *_rows(
+            [
+                {
+                    "label": "The match",
+                    "value": "Each hall scored on each criterion: a match, not listed, or ruled "
+                    "out by its own page. Matches first.",
+                },
+                {"label": "One-time price", "value": " or ".join(prices)},
+                {
+                    "label": "Free either way",
+                    "value": "Housing facts, the school's typical costs, and the apply link",
+                },
+            ]
+        ),
+        {"type": "text", "value": MATCH_NOT_HOUSING, "style": "muted"},
+        {"type": "text", "value": TEST_MONEY, "style": "muted"},
+        _buttons(
+            [
+                ("Unlock my hall match", {"action": "unlock_housing", "workflow_id": workflow_id}),
+                ("Free facts only", {"action": "show_housing_facts", "workflow_id": workflow_id}),
+                MAIN_MENU,
+            ]
+        ),
+    ]
+    card = (
+        "custom",
+        {"root": {"type": "section", "title": f"Your halls at {school}", "children": children}},
+    )
+    return _with_hero(card, "svc-housing", f"Residence halls at {school}")
+
+
+def housing_payment_card(workflow_id: str, prices: list[str]) -> tuple[str, dict[str, Any]]:
+    """Point to ASI:One's payment panel while keeping the free facts available."""
+    return notice_card(
+        "Finish the payment",
+        "Pay in the payment panel ASI:One shows with this message ("
+        + " or ".join(prices)
+        + "). Once ResourcePilot confirms it, the Planner matches your halls. "
+        + MATCH_NOT_HOUSING
+        + " "
+        + TEST_MONEY,
+        badge="Payment requested",
+        buttons=[
+            ("Check payment", {"action": "show_status", "workflow_id": workflow_id}),
+            ("Free facts only", {"action": "show_housing_facts", "workflow_id": workflow_id}),
+        ],
+        image="hero-receipt",
+    )
 
 
 def no_housing_match_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, dict[str, Any]]:

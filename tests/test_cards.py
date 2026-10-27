@@ -169,6 +169,8 @@ FACTORIES = [
     (lambda: cards.housing_detail("workflow-1", HALL, HALLS), "detail"),
     (lambda: cards.housing_detail("workflow-1", PHOTO_HALL, HALLS), "detail"),
     (lambda: cards.no_housing_match_card("workflow-1", HALLS), "custom"),
+    (lambda: cards.housing_unlock_card("workflow-1", HALLS, ["$1.00"]), "custom"),
+    (lambda: cards.housing_payment_card("workflow-1", ["$1.00"]), "custom"),
     (lambda: cards.wellness_card("workflow-1", {"school": {"school_name": "Test U"}}), "custom"),
     (lambda: cards.wellness_card("workflow-1", WELLNESS), "custom"),
     (lambda: cards.wellness_events_card("workflow-1", WELLNESS), "custom"),
@@ -184,6 +186,18 @@ FACTORIES = [
 
 def test_ui_exercises_every_official_card_kind() -> None:
     assert {kind for _, kind in FACTORIES} == cards.CARD_KINDS
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: cards.housing_unlock_card("workflow-1", HALLS, ["$1.00"]),
+        lambda: cards.housing_payment_card("workflow-1", ["$1.00"]),
+    ],
+)
+def test_every_payment_card_says_what_the_money_buys(factory) -> None:
+    text = json.dumps(factory()[1])
+    assert cards.MATCH_NOT_HOUSING in text and cards.TEST_MONEY in text
 
 
 @pytest.mark.parametrize(("factory", "kind"), FACTORIES)
@@ -646,12 +660,21 @@ def test_known_actions_cover_the_room_and_demo_call_flows_only() -> None:
         "view_housing",
         "show_housing_facts",
         "show_all_housing",
+        "unlock_housing",
         "place_call",
         "call_status",
         "open_orchestrator",
     }
     assert set(cards.PROSE_ACTIONS) <= set(cards.KNOWN_ACTIONS)
-    consequential = {"set_school", "submit_form", "recheck_room", "submit_link", "place_call"}
+    consequential = {
+        "set_school",
+        "submit_form",
+        "recheck_room",
+        "submit_link",
+        "place_call",
+        "unlock_housing",
+    }
+    assert consequential <= cards.INPUT_ACTIONS
     assert not consequential & set(cards.PROSE_ACTIONS)
 
 
