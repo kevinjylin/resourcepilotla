@@ -99,3 +99,4 @@ def test_school_email_is_reduced_to_a_domain_in_the_orchestrator() -> None:
     assert '"school_domain": domain, "school_name": school_name' in runtime
     assert 'fields["school_domain"] = domain' in runtime
     assert "_form_fields(selection), profile=profile" in runtime
+    assert runtime.count("await _remember_school_name(") == 1

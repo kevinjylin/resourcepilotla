@@ -88,9 +88,12 @@ STAGE_ART = {
     "emergency": "role-emergency",
     "call": "role-emergency",
     "call_status": "role-emergency",
+    "payment": "svc-housing",
 }
 # An event's own photo URL is shown only when it is this short; the student's browser loads it.
 MAX_PHOTO_URL = 400
+# Keep the tappable event list short; the remainder is counted.
+CARD_EVENTS = 5
 
 PREDEFINED_FIELDS = {
     "carousel": {"title", "subtitle", "items"},
@@ -488,11 +491,6 @@ def card_buttons(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
             return
         if node.get("type") == "button":
             found.append((str(node["label"]), dict(node["action"]["selection"])))
-        if node.get("type") == "list":
-            for item in node.get("items") or []:
-                action = item.get("action") if isinstance(item, dict) else None
-                if isinstance(action, dict) and isinstance(action.get("selection"), dict):
-                    found.append(("List item", dict(action["selection"])))
         if node.get("type") == "list":
             for item in node.get("items") or []:
                 action = item.get("action") if isinstance(item, dict) else None
@@ -1075,6 +1073,7 @@ STAGE_LABELS = {
     "emergency": "Preparing the demo call",
     "call": "Placing the demo call",
     "call_status": "Checking the call",
+    "payment": "Waiting for payment",
 }
 
 
@@ -1830,10 +1829,18 @@ def wellness_events_card(workflow_id: str, data: dict[str, Any]) -> tuple[str, d
                             }
                         },
                     }
-                    for index, event in enumerate(events)
+                    for index, event in enumerate(events[:CARD_EVENTS])
                 ],
             }
         )
+        if len(events) > CARD_EVENTS:
+            children.append(
+                {
+                    "type": "text",
+                    "value": f"Showing {CARD_EVENTS} of {len(events)} verified events.",
+                    "style": "muted",
+                }
+            )
     else:
         children.append(
             {

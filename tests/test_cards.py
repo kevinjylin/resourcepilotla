@@ -288,6 +288,20 @@ def test_visible_links_are_repeated_as_clickable_markdown() -> None:
     assert not any(url == "https://evil.example.com" for _, url in links)
 
 
+def test_link_labels_cannot_inject_markdown() -> None:
+    payload = {
+        "title": "x",
+        "summary_rows": [
+            {"label": "Hall", "value": "[Evil](https://bad.example) **x**: https://ok.edu/a"},
+            {"label": "Sources", "value": "Dropped links: https://dead.edu"},
+        ],
+    }
+    text = cards.with_links("", payload)
+    assert "https://dead.edu" not in text
+    assert "](https://ok.edu/a)" in text
+    assert "\\[Evil\\]" in text and "\\*\\*" in text
+
+
 @pytest.mark.parametrize(
     "factory",
     [
@@ -613,7 +627,8 @@ def test_bookings_card_lists_booked_rooms_with_their_links() -> None:
 def test_progress_card_marks_finished_and_current_stages() -> None:
     chain = ("intake", "researcher", "campus_rooms", "verification", "planner")
     assert set(chain) <= set(cards.STAGE_LABELS)
-    assert {"recheck", "link"} <= set(cards.STAGE_LABELS)
+    assert {"recheck", "link", "payment"} <= set(cards.STAGE_LABELS)
+    assert cards.STAGE_ART["payment"] == "svc-housing"
     assert all(len(label) <= 24 for label in cards.STAGE_LABELS.values())
     _, card = cards.progress_card("workflow-123456789", "verification", chain)
     assert card["root"]["children"][0]["src"] == cards.art("role-verification")
@@ -777,6 +792,26 @@ def test_wellness_hub_choice_grid_routes_to_rooms_and_events() -> None:
     assert {"label": "Need help now?", "value": cards.CRISIS_TEXT} in detail["summary_rows"]
     _, receipt = cards.room_link_receipt(OPTION, service="wellness")
     assert receipt["ctas"][0]["selection"] == {"action": "open_form", "service": "wellness"}
+
+
+def test_wellness_event_list_is_capped_and_actions_are_not_duplicated() -> None:
+    events = [
+        {"title": f"Event {index}", "when": "Tue", "url": f"https://events.x.edu/{index}"}
+        for index in range(cards.CARD_EVENTS + 2)
+    ]
+    _, payload = cards.wellness_events_card(
+        "wf-1",
+        {
+            "school": {"school_name": "Test U"},
+            "wellness": {"status": "found", "events": events},
+        },
+    )
+    event_actions = [
+        selection for label, selection in cards.card_buttons(payload) if label == "List item"
+    ]
+    assert len(event_actions) == cards.CARD_EVENTS
+    assert [selection["event_index"] for selection in event_actions] == ["0", "1", "2", "3", "4"]
+    assert f"Showing {cards.CARD_EVENTS} of {len(events)} verified events." in json.dumps(payload)
 
 
 def test_wellness_events_are_tappable_and_open_a_native_detail() -> None:

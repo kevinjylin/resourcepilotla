@@ -24,6 +24,7 @@ from typing import Any
 from provider_fakes import fake_http
 from uagents import Agent, Model
 from uagents_core.contrib.protocols.chat import ChatAcknowledgement, ChatMessage
+from uagents_core.registration import AgentRegistrationPolicy
 
 from resourcepilot import clock
 from resourcepilot.cards import card_buttons
@@ -46,6 +47,17 @@ HANDLER_NAMES = {
 }
 
 
+class OfflineRegistrationPolicy(AgentRegistrationPolicy):
+    """The in-process network never registers test identities on a live Almanac."""
+
+    async def register(self, *_: Any, **__: Any) -> None:
+        return None
+
+
+def offline_registration_policy(**_: Any) -> OfflineRegistrationPolicy:
+    return OfflineRegistrationPolicy()
+
+
 def build_env() -> dict[str, str]:
     env = {
         "ENABLE_MAILBOX": "false",
@@ -54,7 +66,11 @@ def build_env() -> dict[str, str]:
     }
     for identity in ALL_AGENTS:
         seed = f"resourcepilot-test-seed-{identity.key}-" + "x" * 32
-        probe = Agent(name=f"probe-{identity.key}", seed=seed)
+        probe = Agent(
+            name=f"probe-{identity.key}",
+            seed=seed,
+            registration_policy=OfflineRegistrationPolicy(),
+        )
         env[identity.seed_env] = seed
         env[identity.address_env] = str(probe.address)
     return env
@@ -163,14 +179,19 @@ def _load(path: Path, name: str) -> ModuleType:
 
 def load_modules(env: dict[str, str]) -> dict[str, ModuleType]:
     """Import every runtime once, each under its own role, with the test identities."""
+    import uagents.agent as agent_module
+
     saved = {key: os.environ.get(key) for key in [*env, "AGENT_ROLE"]}
+    default_policy = agent_module.DefaultRegistrationPolicy
     os.environ.update(env)
+    agent_module.DefaultRegistrationPolicy = offline_registration_policy
     modules: dict[str, ModuleType] = {}
     try:
         for role in PLATFORM_ROLES:
             os.environ["AGENT_ROLE"] = role.key
             modules[role.key] = _load(ROOT / "agents" / "run.py", f"_test_agent_{role.key}")
     finally:
+        agent_module.DefaultRegistrationPolicy = default_policy
         for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)

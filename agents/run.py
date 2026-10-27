@@ -1357,8 +1357,6 @@ async def handle_task_result(ctx: Context, sender: str, result: TaskResult) -> N
         ok=result.ok,
     )
     service = str(state.get("service") or "rooms")
-    if result.ok and result.source_role == "researcher":
-        await _remember_school_name(result.requester, dict(result.payload.get("school") or {}))
     if next_task:
         await _dispatch(ctx, next_task)
         if result.source_role == "researcher":
